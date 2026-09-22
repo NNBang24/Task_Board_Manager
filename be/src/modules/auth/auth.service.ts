@@ -1,4 +1,4 @@
-import { ConflictException, Injectable, UnauthorizedException } from '@nestjs/common';
+import { ConflictException, ForbiddenException, Injectable, UnauthorizedException } from '@nestjs/common';
 import { JwtService } from '@nestjs/jwt';
 import { PrismaService } from '../../prisma/prisma.service';
 import { LoginDto } from './dto/login.dto';
@@ -66,6 +66,10 @@ export class AuthService {
 
     if (!user) {
       throw new UnauthorizedException('Email hoặc mật khẩu không chính xác');
+    }
+
+    if (user.isActive === false) {
+      throw new ForbiddenException('Tài khoản của bạn đã bị khóa bởi quản trị viên.');
     }
 
     const isPasswordValid = await bcrypt.compare(loginDto.password, user.password || '');

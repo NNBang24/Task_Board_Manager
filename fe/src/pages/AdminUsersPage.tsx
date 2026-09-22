@@ -24,6 +24,8 @@ import {
   ArrowRightLeft,
   CheckSquare,
   Square,
+  Lock,
+  Unlock,
 } from 'lucide-react';
 import type { GlobalRole, Profession } from '../types/auth';
 import { UserProfileModal, type UserProfileData } from '../components/common/UserProfileModal';
@@ -77,6 +79,17 @@ export const AdminUsersPage: React.FC = () => {
   const [selectedProfileUser, setSelectedProfileUser] = useState<UserProfileData | null>(null);
   const [selectedUserForRole, setSelectedUserForRole] = useState<DirectoryUser | null>(null);
   const [selectedUserForDelete, setSelectedUserForDelete] = useState<DirectoryUser | null>(null);
+  const [selectedUserForLock, setSelectedUserForLock] = useState<DirectoryUser | null>(null);
+
+  // Edit User Modal
+  const [editingUser, setEditingUser] = useState<DirectoryUser | null>(null);
+  const [editFullName, setEditFullName] = useState('');
+  const [editPhone, setEditPhone] = useState('');
+  const [editJobTitle, setEditJobTitle] = useState('');
+  const [editProfession, setEditProfession] = useState<Profession>('DEV');
+  const [editDepartmentId, setEditDepartmentId] = useState('');
+  const [editBio, setEditBio] = useState('');
+  const [isSubmittingUpdate, setIsSubmittingUpdate] = useState(false);
 
   // Department Modals
   const [isCreateDeptModalOpen, setIsCreateDeptModalOpen] = useState(false);
@@ -90,7 +103,6 @@ export const AdminUsersPage: React.FC = () => {
 
   // Toast State
   const [toastMessage, setToastMessage] = useState<string | null>(null);
-
   // Form State for New User
   const [newFullName, setNewFullName] = useState('');
   const [newEmail, setNewEmail] = useState('');
@@ -98,7 +110,10 @@ export const AdminUsersPage: React.FC = () => {
   const [showNewPassword, setShowNewPassword] = useState(false);
   const [newPhone, setNewPhone] = useState('');
   const [newJobTitle, setNewJobTitle] = useState('');
-  const [newDepartment, setNewDepartment] = useState('Engineering');
+
+  // ✅ Để rỗng, không hard-code Engineering
+  const [newDepartment, setNewDepartment] = useState('');
+
   const [newProfession, setNewProfession] = useState<Profession>('DEV');
   const [newRole, setNewRole] = useState<GlobalRole>('EMPLOYEE');
 
@@ -116,25 +131,31 @@ export const AdminUsersPage: React.FC = () => {
   // 🏢 Dynamic Department Dropdown Options
   const departmentOptions = useMemo(() => {
     const dbDeptNames = departments.map((d) => d.name);
-    const userDeptNames = users.map((u) => u.department).filter(Boolean);
-    const combined = Array.from(new Set([...dbDeptNames, ...userDeptNames]));
-    return ['Tất Cả', ...(combined.length > 0 ? combined : ['Engineering', 'Product & Planning', 'Design & UX', 'QA & Testing', 'Operations & SRE'])];
-  }, [departments, users]);
 
-  // Set default selected department for new user when departments load
-  useEffect(() => {
-    if (departments.length > 0 && (!newDepartment || newDepartment === 'Engineering')) {
-      setNewDepartment(departments[0].name);
-    }
-  }, [departments]);
+    const userDeptNames = users.map((u) => u.department).filter(Boolean);
+
+    const combined = Array.from(new Set([...dbDeptNames, ...userDeptNames]));
+
+    return [
+      'Tất Cả',
+      ...(combined.length > 0
+        ? combined
+        : ['Engineering', 'Product & Planning', 'Design & UX', 'QA & Testing', 'Operations & SRE']),
+    ];
+  }, [departments, users]);
+  // const defaultNewDepartment = newDepartment || departments[0]?.name || '';
 
   const handleGenerateRandomPassword = () => {
     const chars = 'ABCDEFGHJKLMNPQRSTUVWXYZabcdefghijkmnpqrstuvwxyz23456789!@#$%';
+
     let pass = 'Sol@';
+
     for (let i = 0; i < 6; i++) {
       pass += chars.charAt(Math.floor(Math.random() * chars.length));
     }
+
     setNewPassword(pass);
+
     showToast(`🔑 Đã tạo mật khẩu ngẫu nhiên: ${pass}`);
   };
 
@@ -237,11 +258,62 @@ export const AdminUsersPage: React.FC = () => {
       joinedDate: u.joinedDate,
       projectsCount: u.projectsCount,
       tasksCount: u.tasksCount,
-      bio:
-        u.bio ||
-        `Chuyên gia ${u.jobTitle} phụ trách các giải pháp phân hệ ${u.department} tại Solaris Platform.`,
+      bio: u.bio || `Chuyên gia ${u.jobTitle} phụ trách các giải pháp phân hệ ${u.department} tại Solaris Platform.`,
       workMode: u.workMode || 'OFFICE',
     });
+  };
+
+  const handleOpenEditUser = (user: DirectoryUser) => {
+    const resolvedDepartmentId = user.departmentId || departments.find((d) => d.name === user.department)?.id || '';
+
+    setEditingUser(user);
+    setEditFullName(user.fullName || '');
+    setEditPhone(user.phone || '');
+    setEditJobTitle(user.jobTitle || '');
+    setEditProfession(user.profession || 'DEV');
+    setEditDepartmentId(resolvedDepartmentId);
+    setEditBio(user.bio || '');
+  };
+
+  const handleCloseEditUser = () => {
+    if (isSubmittingUpdate) return;
+    setEditingUser(null);
+  };
+
+  const handleUpdateUser = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!editingUser) return;
+
+    if (!editFullName.trim()) {
+      showToast('⚠️ Họ và tên không được để trống!');
+      return;
+    }
+
+    setIsSubmittingUpdate(true);
+    try {
+      await api.patch(`/users/${editingUser.id}`, {
+        fullName: editFullName.trim(),
+        phone: editPhone.trim(),
+        jobTitle: editJobTitle.trim(),
+        profession: editProfession,
+        departmentId: editDepartmentId || undefined,
+        bio: editBio.trim(),
+      });
+
+      await fetchUsers();
+      setEditingUser(null);
+
+      if (selectedProfileUser?.id === editingUser.id) {
+        setSelectedProfileUser(null);
+      }
+
+      showToast(`✅ Đã cập nhật thông tin nhân sự: ${editFullName.trim()}`);
+    } catch (err: unknown) {
+      const msg = err instanceof Error ? err.message : 'Cập nhật thông tin nhân sự thất bại';
+      showToast(`❌ Lỗi: ${msg}`);
+    } finally {
+      setIsSubmittingUpdate(false);
+    }
   };
 
   const handleUpdateRole = async (userId: string, newRoleValue: GlobalRole) => {
@@ -280,6 +352,22 @@ export const AdminUsersPage: React.FC = () => {
       showToast(`🔑 Đã cấp lại mật khẩu mặc định cho ${u.fullName}!`);
     } catch (err: unknown) {
       const msg = err instanceof Error ? err.message : 'Không thể cấp lại mật khẩu';
+      showToast(`❌ Lỗi: ${msg}`);
+    } finally {
+      setActionLoadingId(null);
+    }
+  };
+
+  const handleToggleLockUser = async (user: DirectoryUser) => {
+    const nextActiveState = !user.isActive;
+    setActionLoadingId(user.id);
+    try {
+      await api.patch(`/users/${user.id}/lock`, { isActive: nextActiveState });
+      await fetchUsers();
+      setSelectedUserForLock(null);
+      showToast(`🔒 Đã ${nextActiveState ? 'mở khóa' : 'khóa'} tài khoản của ${user.fullName}`);
+    } catch (err: unknown) {
+      const msg = err instanceof Error ? err.message : 'Thao tác thất bại';
       showToast(`❌ Lỗi: ${msg}`);
     } finally {
       setActionLoadingId(null);
@@ -350,7 +438,7 @@ export const AdminUsersPage: React.FC = () => {
     try {
       await deleteDepartment(deletingDept.id);
       setDeletingDept(null);
-      await fetchUsers(); // Refresh users since department was detached
+      await fetchUsers();
       showToast(`🗑️ Đã xóa phòng ban: ${deletingDept.name}`);
     } catch (err: unknown) {
       const msg = err instanceof Error ? err.message : 'Xóa phòng ban thất bại';
@@ -363,9 +451,7 @@ export const AdminUsersPage: React.FC = () => {
   // 👥 Multi-Selection Handlers
   const handleToggleSelectUser = (userId: string, e?: React.MouseEvent) => {
     e?.stopPropagation();
-    setSelectedUserIds((prev) =>
-      prev.includes(userId) ? prev.filter((id) => id !== userId) : [...prev, userId]
-    );
+    setSelectedUserIds((prev) => (prev.includes(userId) ? prev.filter((id) => id !== userId) : [...prev, userId]));
   };
 
   const isAllFilteredSelected = useMemo(() => {
@@ -440,9 +526,7 @@ export const AdminUsersPage: React.FC = () => {
       );
       setIsTransferModalOpen(false);
       setSelectedUserIds([]);
-      showToast(
-        `✅ Đã điều chuyển ${transferUserList.length} nhân sự sang phòng ban "${targetDept.name}" thành công!`
-      );
+      showToast(`✅ Đã điều chuyển ${transferUserList.length} nhân sự sang phòng ban "${targetDept.name}" thành công!`);
     } catch (err: unknown) {
       const msg = err instanceof Error ? err.message : 'Điều chuyển nhân sự thất bại';
       showToast(`❌ Lỗi: ${msg}`);
@@ -517,9 +601,7 @@ export const AdminUsersPage: React.FC = () => {
         <button
           onClick={() => setActiveMainTab('users')}
           className={`px-4 py-2 rounded-lg text-xs font-semibold transition-all flex items-center gap-2 cursor-pointer ${
-            activeMainTab === 'users'
-              ? 'bg-slate-800 text-white shadow-sm'
-              : 'text-slate-400 hover:text-white'
+            activeMainTab === 'users' ? 'bg-slate-800 text-white shadow-sm' : 'text-slate-400 hover:text-white'
           }`}
         >
           <Users className="w-3.5 h-3.5" />
@@ -528,9 +610,7 @@ export const AdminUsersPage: React.FC = () => {
         <button
           onClick={() => setActiveMainTab('departments')}
           className={`px-4 py-2 rounded-lg text-xs font-semibold transition-all flex items-center gap-2 cursor-pointer ${
-            activeMainTab === 'departments'
-              ? 'bg-slate-800 text-white shadow-sm'
-              : 'text-slate-400 hover:text-white'
+            activeMainTab === 'departments' ? 'bg-slate-800 text-white shadow-sm' : 'text-slate-400 hover:text-white'
           }`}
         >
           <Building2 className="w-3.5 h-3.5" />
@@ -657,9 +737,7 @@ export const AdminUsersPage: React.FC = () => {
                   <button
                     onClick={() => setViewMode('cards')}
                     className={`p-1.5 rounded-lg transition-all cursor-pointer ${
-                      viewMode === 'cards'
-                        ? 'bg-slate-800 text-white font-bold'
-                        : 'text-slate-400 hover:text-white'
+                      viewMode === 'cards' ? 'bg-slate-800 text-white font-bold' : 'text-slate-400 hover:text-white'
                     }`}
                     title="Chế độ Thẻ"
                   >
@@ -668,9 +746,7 @@ export const AdminUsersPage: React.FC = () => {
                   <button
                     onClick={() => setViewMode('table')}
                     className={`p-1.5 rounded-lg transition-all cursor-pointer ${
-                      viewMode === 'table'
-                        ? 'bg-slate-800 text-white font-bold'
-                        : 'text-slate-400 hover:text-white'
+                      viewMode === 'table' ? 'bg-slate-800 text-white font-bold' : 'text-slate-400 hover:text-white'
                     }`}
                     title="Chế độ Bảng"
                   >
@@ -688,9 +764,7 @@ export const AdminUsersPage: React.FC = () => {
                     {selectedUserIds.length}
                   </div>
                   <div>
-                    <span className="text-xs font-bold text-white block">
-                      Đã chọn {selectedUserIds.length} nhân sự
-                    </span>
+                    <span className="text-xs font-bold text-white block">Đã chọn {selectedUserIds.length} nhân sự</span>
                     <span className="text-[11px] text-slate-400">
                       Sẵn sàng thực hiện điều chuyển khối phòng ban hàng loạt
                     </span>
@@ -759,11 +833,7 @@ export const AdminUsersPage: React.FC = () => {
                             }`}
                             title={isSelected ? 'Bỏ chọn' : 'Tích chọn nhân sự này'}
                           >
-                            {isSelected ? (
-                              <CheckSquare className="w-4 h-4" />
-                            ) : (
-                              <Square className="w-4 h-4" />
-                            )}
+                            {isSelected ? <CheckSquare className="w-4 h-4" /> : <Square className="w-4 h-4" />}
                           </button>
 
                           <div className="relative shrink-0">
@@ -813,11 +883,49 @@ export const AdminUsersPage: React.FC = () => {
 
                     {/* Card Actions Footer */}
                     <div
-                      className="pt-3 border-t border-slate-800/80 flex items-center justify-end gap-2"
+                      className="pt-3 border-t border-slate-800/80 flex items-center justify-between gap-2"
                       onClick={(e) => e.stopPropagation()}
                     >
+                      {/* Trạng thái Hoạt động / Khóa */}
+                      <td className="py-3.5 px-4">
+                        <span
+                          className={`text-[10px] font-mono font-bold px-2 py-0.5 rounded-lg border inline-block ${
+                            user.isActive === true
+                              ? 'bg-emerald-500/10 text-emerald-400 border-emerald-500/30'
+                              : 'bg-rose-500/10 text-rose-400 border-rose-500/30'
+                          }`}
+                        >
+                          {user.isActive === true ? '● Hoạt động' : '■ Đã khóa'}
+                        </span>
+                      </td>
+
                       {/* Action Icon Buttons */}
                       <div className="flex items-center gap-1.5">
+                        <button
+                          onClick={() => handleOpenEditUser(user)}
+                          className="p-2 rounded-xl bg-blue-500/10 hover:bg-blue-500/20 text-blue-300 border border-blue-500/30 transition-colors cursor-pointer"
+                          title="Cập nhật thông tin nhân sự"
+                        >
+                          <Edit2 className="w-3.5 h-3.5" />
+                        </button>
+
+                        {/* Nút Khóa / Mở khóa tài khoản */}
+                        <button
+                          onClick={() => setSelectedUserForLock(user)}
+                          className={`p-2 rounded-xl border transition-colors cursor-pointer ${
+                            user.isActive === true
+                              ? 'bg-amber-500/10 hover:bg-amber-500/20 text-amber-300 border-amber-500/30'
+                              : 'bg-emerald-500/10 hover:bg-emerald-500/20 text-emerald-300 border-emerald-500/30'
+                          }`}
+                          title={user.isActive === true ? 'Khóa tài khoản' : 'Mở khóa tài khoản'}
+                        >
+                          {user.isActive === true ? (
+                            <Lock className="w-3.5 h-3.5" />
+                          ) : (
+                            <Unlock className="w-3.5 h-3.5" />
+                          )}
+                        </button>
+
                         <button
                           onClick={(e) => handleOpenTransferSingle(user, e)}
                           className="p-2 rounded-xl bg-cyan-500/10 hover:bg-cyan-500/20 text-cyan-300 border border-cyan-500/30 transition-colors cursor-pointer"
@@ -883,6 +991,7 @@ export const AdminUsersPage: React.FC = () => {
                       <th className="py-3.5 px-4">Nhân Sự</th>
                       <th className="py-3.5 px-4">Chức Danh / Khối</th>
                       <th className="py-3.5 px-4">Vai Trò (Role)</th>
+                      <th className="py-3.5 px-4">Trạng Thái</th>
                       <th className="py-3.5 px-5 text-right">Thao Tác</th>
                     </tr>
                   </thead>
@@ -895,9 +1004,7 @@ export const AdminUsersPage: React.FC = () => {
                           key={user.id}
                           onClick={() => handleOpenProfile(user)}
                           className={`transition-colors cursor-pointer group ${
-                            isSelected
-                              ? 'bg-amber-500/10 hover:bg-amber-500/15'
-                              : 'hover:bg-slate-800/40'
+                            isSelected ? 'bg-amber-500/10 hover:bg-amber-500/15' : 'hover:bg-slate-800/40'
                           }`}
                         >
                           <td className="py-3.5 px-3 text-center" onClick={(e) => e.stopPropagation()}>
@@ -954,8 +1061,42 @@ export const AdminUsersPage: React.FC = () => {
                             </span>
                           </td>
 
+                          <td className="py-3.5 px-4">
+                            <span
+                              className={`text-[10px] font-mono font-bold px-2 py-0.5 rounded-lg border inline-block ${
+                                user.isActive !== false
+                                  ? 'bg-emerald-500/10 text-emerald-400 border-emerald-500/30'
+                                  : 'bg-rose-500/10 text-rose-400 border-rose-500/30'
+                              }`}
+                            >
+                              {user.isActive !== false ? '● Hoạt động' : '■ Đã khóa'}
+                            </span>
+                          </td>
+
                           <td className="py-3.5 px-5 text-right" onClick={(e) => e.stopPropagation()}>
                             <div className="flex items-center justify-end gap-1.5">
+                              <button
+                                onClick={() => handleOpenEditUser(user)}
+                                className="p-1.5 rounded-lg bg-blue-500/15 hover:bg-blue-500/25 text-blue-300 transition-colors cursor-pointer"
+                                title="Cập nhật thông tin nhân sự"
+                              >
+                                <Edit2 className="w-4 h-4" />
+                              </button>
+                              <button
+                                onClick={() => setSelectedUserForLock(user)}
+                                className={`p-1.5 rounded-lg transition-colors cursor-pointer ${
+                                  user.isActive !== false
+                                    ? 'bg-amber-500/15 hover:bg-amber-500/25 text-amber-300'
+                                    : 'bg-emerald-500/15 hover:bg-emerald-500/25 text-emerald-300'
+                                }`}
+                                title={user.isActive !== false ? 'Khóa tài khoản' : 'Mở khóa tài khoản'}
+                              >
+                                {user.isActive !== false ? (
+                                  <Lock className="w-4 h-4" />
+                                ) : (
+                                  <Unlock className="w-4 h-4" />
+                                )}
+                              </button>
                               <button
                                 onClick={(e) => handleOpenTransferSingle(user, e)}
                                 className="p-1.5 rounded-lg bg-cyan-500/15 hover:bg-cyan-500/25 text-cyan-300 transition-colors cursor-pointer"
@@ -1067,7 +1208,9 @@ export const AdminUsersPage: React.FC = () => {
             <div className="py-16 text-center solar-glass-card rounded-3xl bg-[#0F172A]/80 border border-slate-800 space-y-3">
               <Building2 className="w-12 h-12 text-slate-600 mx-auto" />
               <h3 className="text-sm font-bold text-slate-300">Chưa có phòng ban nào được tạo</h3>
-              <p className="text-xs text-slate-500">Bấm nút "Thêm Phòng Ban Mới" ở góc trên để khởi tạo phòng ban đầu tiên.</p>
+              <p className="text-xs text-slate-500">
+                Bấm nút &quot;Thêm Phòng Ban Mới&quot; ở góc trên để khởi tạo phòng ban đầu tiên.
+              </p>
               <button
                 onClick={handleOpenCreateDept}
                 className="px-4 py-2 rounded-xl bg-amber-500 text-slate-950 font-bold text-xs cursor-pointer hover:bg-amber-400"
@@ -1193,6 +1336,59 @@ export const AdminUsersPage: React.FC = () => {
         onSendMessage={(u) => showToast(`💬 Đang mở hộp thoại chat với ${u.fullName}...`)}
       />
 
+      {/* 🔒 MODAL: CONFIRM LOCK / UNLOCK USER */}
+      {selectedUserForLock && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/80 backdrop-blur-md animate-fade-in">
+          <div className="w-full max-w-md solar-glass-card rounded-3xl bg-[#0F172A]/95 border border-amber-500/40 p-6 space-y-5 relative animate-solar-warp-in text-center shadow-xl">
+            <div
+              className={`w-14 h-14 rounded-2xl border flex items-center justify-center mx-auto ${
+                selectedUserForLock.isActive !== false
+                  ? 'bg-amber-500/20 text-amber-400 border-amber-500/40'
+                  : 'bg-emerald-500/20 text-emerald-400 border-emerald-500/40'
+              }`}
+            >
+              {selectedUserForLock.isActive !== false ? <Lock className="w-7 h-7" /> : <Unlock className="w-7 h-7" />}
+            </div>
+
+            <div className="space-y-1">
+              <h3 className="text-base font-extrabold text-white">
+                {selectedUserForLock.isActive !== false ? 'Xác Nhận Khóa Tài Khoản?' : 'Xác Nhận Mở Khóa Tài Khoản?'}
+              </h3>
+              <p className="text-xs text-slate-400">
+                Nhân sự: <span className="text-white font-bold">{selectedUserForLock.fullName}</span>
+              </p>
+            </div>
+
+            <p className="text-xs text-slate-300 bg-slate-900/80 p-3 rounded-2xl border border-slate-800">
+              {selectedUserForLock.isActive !== false
+                ? '⚠️ Sau khi khóa, tài khoản này sẽ tạm thời không thể đăng nhập vào hệ thống Task Board.'
+                : '✅ Sau khi mở khóa, tài khoản này có thể truy cập và làm việc bình thường trở lại.'}
+            </p>
+
+            <div className="flex items-center justify-center gap-3 pt-2">
+              <button
+                onClick={() => setSelectedUserForLock(null)}
+                className="px-5 py-2.5 rounded-xl bg-slate-800 text-slate-300 text-xs font-bold hover:bg-slate-700 cursor-pointer"
+              >
+                Hủy Bỏ
+              </button>
+              <button
+                disabled={actionLoadingId === selectedUserForLock.id}
+                onClick={() => handleToggleLockUser(selectedUserForLock)}
+                className={`px-5 py-2.5 rounded-xl font-bold text-xs cursor-pointer shadow-md transition-all flex items-center gap-1.5 disabled:opacity-50 text-slate-950 ${
+                  selectedUserForLock.isActive !== false
+                    ? 'bg-amber-500 hover:bg-amber-400'
+                    : 'bg-emerald-400 hover:bg-emerald-300'
+                }`}
+              >
+                {actionLoadingId === selectedUserForLock.id && <Loader2 className="w-3.5 h-3.5 animate-spin" />}
+                {selectedUserForLock.isActive !== false ? 'Xác Nhận Khóa' : 'Xác Nhận Mở Khóa'}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
       {/* 🚀 MODAL 1: CREATE NEW USER MODAL */}
       {isCreateModalOpen && (
         <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/80 backdrop-blur-md animate-fade-in">
@@ -1310,11 +1506,13 @@ export const AdminUsersPage: React.FC = () => {
                     onChange={(e) => setNewDepartment(e.target.value)}
                     className="w-full p-3 rounded-xl bg-slate-900 border border-slate-800 text-white focus:outline-none focus:border-amber-500 cursor-pointer"
                   >
-                    {departmentOptions.filter((d) => d !== 'Tất Cả').map((dept) => (
-                      <option key={dept} value={dept}>
-                        {dept}
-                      </option>
-                    ))}
+                    {departmentOptions
+                      .filter((d) => d !== 'Tất Cả')
+                      .map((dept) => (
+                        <option key={dept} value={dept}>
+                          {dept}
+                        </option>
+                      ))}
                   </select>
                 </div>
               </div>
@@ -1373,6 +1571,148 @@ export const AdminUsersPage: React.FC = () => {
         </div>
       )}
 
+      {/* ✏️ MODAL 2: UPDATE USER MODAL */}
+      {editingUser && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/80 backdrop-blur-md animate-fade-in">
+          <div className="w-full max-w-xl solar-glass-card rounded-3xl bg-[#0F172A]/95 border border-blue-500/40 shadow-[0_0_60px_rgba(59,130,246,0.18)] p-6 sm:p-8 space-y-6 relative overflow-hidden animate-solar-warp-in">
+            <div className="flex items-center justify-between border-b border-slate-800 pb-4">
+              <div className="flex items-center gap-3">
+                <div className="p-2 rounded-xl bg-blue-500/20 text-blue-300 border border-blue-500/40">
+                  <Edit2 className="w-5 h-5" />
+                </div>
+                <div>
+                  <h2 className="text-lg font-extrabold text-white">Cập Nhật Thông Tin Nhân Sự</h2>
+                  <p className="text-xs text-slate-400">Chỉnh sửa hồ sơ của {editingUser.fullName}</p>
+                </div>
+              </div>
+              <button
+                type="button"
+                onClick={handleCloseEditUser}
+                disabled={isSubmittingUpdate}
+                className="text-slate-400 hover:text-white p-1 rounded-lg disabled:opacity-50 cursor-pointer"
+              >
+                <X className="w-5 h-5" />
+              </button>
+            </div>
+
+            <form onSubmit={handleUpdateUser} className="space-y-4 text-xs">
+              <div className="space-y-1">
+                <label className="text-slate-300 font-bold">Họ Và Tên *</label>
+                <input
+                  type="text"
+                  required
+                  value={editFullName}
+                  onChange={(e) => setEditFullName(e.target.value)}
+                  className="w-full p-3 rounded-xl bg-slate-900 border border-slate-800 text-white placeholder-slate-600 focus:outline-none focus:border-blue-500"
+                />
+              </div>
+
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                <div className="space-y-1">
+                  <label className="text-slate-300 font-bold">Email</label>
+                  <input
+                    type="email"
+                    value={editingUser.email}
+                    disabled
+                    className="w-full p-3 rounded-xl bg-slate-950/70 border border-slate-800 text-slate-500 cursor-not-allowed"
+                  />
+                  <span className="text-[10px] text-slate-500">
+                    Email không được cập nhật hiện tại.
+                  </span>
+                </div>
+
+                <div className="space-y-1">
+                  <label className="text-slate-300 font-bold">Số Điện Thoại</label>
+                  <input
+                    type="text"
+                    value={editPhone}
+                    onChange={(e) => setEditPhone(e.target.value)}
+                    placeholder="0912 345 678"
+                    className="w-full p-3 rounded-xl bg-slate-900 border border-slate-800 text-white placeholder-slate-600 focus:outline-none focus:border-blue-500"
+                  />
+                </div>
+              </div>
+
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                <div className="space-y-1">
+                  <label className="text-slate-300 font-bold">Chức Danh Công Việc</label>
+                  <input
+                    type="text"
+                    value={editJobTitle}
+                    onChange={(e) => setEditJobTitle(e.target.value)}
+                    placeholder="VD: Senior Frontend Dev"
+                    className="w-full p-3 rounded-xl bg-slate-900 border border-slate-800 text-white placeholder-slate-600 focus:outline-none focus:border-blue-500"
+                  />
+                </div>
+
+                <div className="space-y-1">
+                  <label className="text-slate-300 font-bold">Chuyên Môn</label>
+                  <select
+                    value={editProfession}
+                    onChange={(e) => setEditProfession(e.target.value as Profession)}
+                    className="w-full p-3 rounded-xl bg-slate-900 border border-slate-800 text-white focus:outline-none focus:border-blue-500 cursor-pointer"
+                  >
+                    <option value="DEV">DEV (Lập trình viên)</option>
+                    <option value="TESTER">TESTER (Kiểm thử QA/QC)</option>
+                    <option value="DESIGNER">DESIGNER (Thiết kế UI/UX)</option>
+                    <option value="BA">BA (Phân tích nghiệp vụ)</option>
+                    <option value="PRODUCT_OWNER">PRODUCT_OWNER (Quản trị sản phẩm)</option>
+                    <option value="DEVOPS">DEVOPS (Vận hành hạ tầng)</option>
+                    <option value="MARKETING">MARKETING (Truyền thông)</option>
+                  </select>
+                </div>
+              </div>
+
+              <div className="space-y-1">
+                <label className="text-slate-300 font-bold">Phòng Ban</label>
+                <select
+                  value={editDepartmentId}
+                  onChange={(e) => setEditDepartmentId(e.target.value)}
+                  className="w-full p-3 rounded-xl bg-slate-900 border border-slate-800 text-white focus:outline-none focus:border-blue-500 cursor-pointer"
+                >
+                  <option value="">-- Chưa phân bổ --</option>
+                  {departments.map((dept) => (
+                    <option key={dept.id} value={dept.id}>
+                      {dept.name} ({dept.code})
+                    </option>
+                  ))}
+                </select>
+              </div>
+
+              <div className="space-y-1">
+                <label className="text-slate-300 font-bold">Giới Thiệu / Bio</label>
+                <textarea
+                  rows={4}
+                  value={editBio}
+                  onChange={(e) => setEditBio(e.target.value)}
+                  placeholder="Mô tả ngắn về nhân sự..."
+                  className="w-full p-3 rounded-xl bg-slate-900 border border-slate-800 text-white placeholder-slate-600 focus:outline-none focus:border-blue-500 resize-none"
+                />
+              </div>
+
+              <div className="pt-4 flex items-center justify-end gap-3 border-t border-slate-800">
+                <button
+                  type="button"
+                  onClick={handleCloseEditUser}
+                  disabled={isSubmittingUpdate}
+                  className="px-4 py-2.5 rounded-xl bg-slate-800 text-slate-300 hover:bg-slate-700 font-bold cursor-pointer disabled:opacity-50"
+                >
+                  Hủy Bỏ
+                </button>
+                <button
+                  type="submit"
+                  disabled={isSubmittingUpdate}
+                  className="px-6 py-2.5 rounded-xl bg-blue-500 hover:bg-blue-400 text-white font-bold shadow-md cursor-pointer transition-all flex items-center gap-2 disabled:opacity-50"
+                >
+                  {isSubmittingUpdate && <Loader2 className="w-4 h-4 animate-spin" />}
+                  Lưu Thay Đổi
+                </button>
+              </div>
+            </form>
+          </div>
+        </div>
+      )}
+
       {/* 🛡️ MODAL 2: EDIT ROLE ELEVATION MODAL */}
       {selectedUserForRole && (
         <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/80 backdrop-blur-md animate-fade-in">
@@ -1389,7 +1729,8 @@ export const AdminUsersPage: React.FC = () => {
 
             <p className="text-xs text-slate-300">
               Chọn cấp độ đặc quyền mới cho nhân sự. Lưu ý: Cấp quyền{' '}
-              <span className="text-rose-400 font-bold">ADMIN</span> sẽ cho phép người dùng truy cập toàn bộ dữ liệu và Thùng rác hệ thống.
+              <span className="text-rose-400 font-bold">ADMIN</span> sẽ cho phép người dùng truy cập toàn bộ dữ liệu và
+              Thùng rác hệ thống.
             </p>
 
             <div className="space-y-2 text-xs">
@@ -1410,9 +1751,7 @@ export const AdminUsersPage: React.FC = () => {
                     {r === 'MANAGER' && 'MANAGER — Quản lý Dự án & Duyệt bài'}
                     {r === 'EMPLOYEE' && 'EMPLOYEE — Nhân viên tác nghiệp'}
                   </span>
-                  {selectedUserForRole.globalRole === r && (
-                    <CheckCircle2 className="w-4 h-4 text-purple-400" />
-                  )}
+                  {selectedUserForRole.globalRole === r && <CheckCircle2 className="w-4 h-4 text-purple-400" />}
                 </button>
               ))}
             </div>
@@ -1429,8 +1768,6 @@ export const AdminUsersPage: React.FC = () => {
         </div>
       )}
 
-
-
       {/* 👤 MODAL 4: DELETE USER CONFIRM MODAL */}
       {selectedUserForDelete && (
         <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/80 backdrop-blur-md animate-fade-in">
@@ -1440,16 +1777,15 @@ export const AdminUsersPage: React.FC = () => {
             </div>
 
             <div className="space-y-1">
-              <h3 className="text-base font-extrabold text-white">
-                Xác Nhận Xóa Vĩnh Viễn?
-              </h3>
+              <h3 className="text-base font-extrabold text-white">Xác Nhận Xóa Vĩnh Viễn?</h3>
               <p className="text-xs text-slate-400">
-                Thành viên: <span className="text-white font-bold">{selectedUserForDelete.fullName}</span> ({selectedUserForDelete.email})
+                Thành viên: <span className="text-white font-bold">{selectedUserForDelete.fullName}</span> (
+                {selectedUserForDelete.email})
               </p>
             </div>
 
             <p className="text-xs text-rose-300/90 bg-rose-950/40 p-3 rounded-2xl border border-rose-500/30 leading-relaxed">
-              ⚠️ Hành động này sẽ xóa vĩnh viễn tài khoản người dùng khỏi hệ thống CSDL và không thể hoàn tác.
+              ⚠️ Xóa tài khoản
             </p>
 
             <div className="flex items-center justify-center gap-3 pt-2">
@@ -1487,9 +1823,7 @@ export const AdminUsersPage: React.FC = () => {
                 </div>
                 <div>
                   <h2 className="text-lg font-extrabold text-white">Thêm Khối Phòng Ban Mới</h2>
-                  <p className="text-xs text-slate-400">
-                    Khởi tạo phòng ban để phân nhóm và quản lý cơ cấu nhân sự
-                  </p>
+                  <p className="text-xs text-slate-400">Khởi tạo phòng ban để phân nhóm và quản lý cơ cấu nhân sự</p>
                 </div>
               </div>
               <button
@@ -1570,9 +1904,7 @@ export const AdminUsersPage: React.FC = () => {
                 </div>
                 <div>
                   <h2 className="text-lg font-extrabold text-white">Chỉnh Sửa Phòng Ban</h2>
-                  <p className="text-xs text-slate-400">
-                    Cập nhật thông tin chi tiết của khối phòng ban
-                  </p>
+                  <p className="text-xs text-slate-400">Cập nhật thông tin chi tiết của khối phòng ban</p>
                 </div>
               </div>
               <button
@@ -1597,7 +1929,7 @@ export const AdminUsersPage: React.FC = () => {
               </div>
 
               <div className="space-y-1">
-                <label className="text-slate-300 font-bold">Mã Phòng Ban (Code) *</label>
+                <label className="text-slate-300 font-bold">Mã Phòng Ban *</label>
                 <input
                   type="text"
                   required
@@ -1641,7 +1973,6 @@ export const AdminUsersPage: React.FC = () => {
         </div>
       )}
 
-      {/* 🏢 MODAL 7: DELETE DEPARTMENT MODAL */}
       {deletingDept && (
         <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/80 backdrop-blur-md animate-fade-in">
           <div className="w-full max-w-md solar-glass-card rounded-3xl bg-[#0F172A]/95 border border-rose-500/50 p-6 space-y-5 relative animate-solar-warp-in text-center shadow-[0_0_60px_rgba(244,63,94,0.3)]">
@@ -1650,16 +1981,15 @@ export const AdminUsersPage: React.FC = () => {
             </div>
 
             <div className="space-y-1">
-              <h3 className="text-base font-extrabold text-white">
-                Xác Nhận Giải Thể / Xóa Phòng Ban?
-              </h3>
+              <h3 className="text-base font-extrabold text-white">Xác Nhận Giải Thể / Xóa Phòng Ban?</h3>
               <p className="text-xs text-slate-400">
                 Phòng ban: <span className="text-white font-bold">{deletingDept.name}</span> ({deletingDept.code})
               </p>
             </div>
 
             <p className="text-xs text-rose-300/90 bg-rose-950/40 p-3 rounded-2xl border border-rose-500/30 leading-relaxed">
-              ⚠️ Khi xóa phòng ban, các nhân sự thuộc phòng ban này sẽ được tự động chuyển về trạng thái &quot;Chưa phân bổ&quot;. Dữ liệu nhân sự và các task liên quan vẫn được bảo toàn nguyên vẹn.
+              ⚠️ Khi xóa phòng ban, các nhân sự thuộc phòng ban này sẽ được tự động chuyển về trạng thái &quot;Chưa phân
+              bổ&quot;. Dữ liệu nhân sự và các task liên quan vẫn được bảo toàn nguyên vẹn.
             </p>
 
             <div className="flex items-center justify-center gap-3 pt-2">
@@ -1806,7 +2136,6 @@ export const AdminUsersPage: React.FC = () => {
                 </div>
               </div>
 
-              {/* Action Buttons */}
               <div className="pt-4 flex items-center justify-end gap-3 border-t border-slate-800">
                 <button
                   type="button"

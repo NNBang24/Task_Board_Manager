@@ -61,7 +61,7 @@ import {
 
 import { TaskTransferInboxModal } from '../components/kanban/TaskTransferInboxModal';
 import { DeleteTaskConfirmModal } from '../components/kanban/DeleteTaskConfirmModal';
-
+import {TaskActivityTimeline} from '../components/activity/TaskActivityTimeline'
 export const BoardPage: React.FC = () => {
   const user = useAuthStore((state) => state.user);
   const token = useAuthStore((state) => state.token);
@@ -1933,6 +1933,7 @@ export const BoardPage: React.FC = () => {
           setTaskToDelete(t);
           setIsDeleteModalOpen(true);
         }}
+        
       />
 
       {/* 🗑️ DELETE TASK CONFIRMATION MODAL */}
@@ -2160,6 +2161,8 @@ export const BoardPage: React.FC = () => {
         message={modalState.message}
         type={modalState.type}
       />
+      
     </div>
+    
   );
 };

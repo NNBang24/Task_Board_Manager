@@ -493,7 +493,6 @@ export class TaskService {
   }
 
   async addComment(taskId: string, userId: string, dto: CreateTaskCommentDto) {
-    // 🔒 [LC-71] KIỂM TRA QUYỀN THÀNH VIÊN DỰ ÁN VÀ KHÓA TASK TRONG THÙNG RÁC
     const targetTask = await this.prisma.task.findUnique({
       where: { id: taskId },
       include: { project: { include: { members: true } } },
@@ -501,8 +500,6 @@ export class TaskService {
     if (!targetTask || targetTask.isDeleted) {
       throw new NotFoundException('Task không tồn tại hoặc đã bị xóa vào thùng rác');
     }
-
-    // 🔒 [LC-75] CHUẨN HÓA NỘI DUNG BÌNH LUẬN & CHẶN BÌNH LUẬN RỖNG
     const cleanContent = (dto.content || dto.text || '').trim();
     if (!cleanContent) {
       throw new BadRequestException('Nội dung bình luận không được để trống!');
@@ -560,7 +557,6 @@ export class TaskService {
       this.socketGateway.broadcastToProject(targetTask.projectId, 'comment:created', { taskId, comment: result });
     }
 
-    // 🔔 Gửi thông báo bình luận tới Người được giao việc và Người tạo Task
     if (targetTask.assigneeId && targetTask.assigneeId !== userId) {
       await this.notificationService.sendNotification({
         userId: targetTask.assigneeId,
@@ -587,7 +583,6 @@ export class TaskService {
         projectId: targetTask.projectId,
       });
     }
-
     // 🔔 [LC-119] TỰ ĐỘNG PHÁT HIỆN @MENTION VÀ GỬI THÔNG BÁO NHẮC TÊN CHO THÀNH VIÊN DỰ ÁN
     if (targetTask.project?.members && cleanContent.includes('@')) {
       for (const m of targetTask.project.members) {

@@ -4,7 +4,11 @@ import {
   CheckCircle2,
   Flame,
   User as UserIcon,
+  Home,
+  Palmtree,
+  Plane,
 } from 'lucide-react';
+import { useScheduleStore } from '../../store/useScheduleStore';
 import type { TaskItem } from '../kanban/KanbanCard';
 
 interface MemberUser {
@@ -30,6 +34,8 @@ export const WeekTimelineView: React.FC<WeekTimelineViewProps> = ({
   onSelectTask,
   onSelectDate,
 }) => {
+  const { getWorkLocationForDate } = useScheduleStore();
+
   // 🗓️ Tính toán 7 ngày trong tuần hiện tại (Bắt đầu từ Thứ 2)
   const startOfWeek = new Date(currentDate);
   const day = startOfWeek.getDay();
@@ -169,6 +175,9 @@ export const WeekTimelineView: React.FC<WeekTimelineViewProps> = ({
               <div className="col-span-9 grid grid-cols-7 gap-2 min-h-[60px] p-2 rounded-2xl bg-slate-950/60 border border-slate-900">
                 {weekDays.map((wd, dayIdx) => {
                   const dayTime = wd.date.getTime();
+                  const dateKey = `${wd.date.getFullYear()}-${String(wd.date.getMonth() + 1).padStart(2, '0')}-${String(wd.date.getDate()).padStart(2, '0')}`;
+                  const locInfo = member.id !== 'UNASSIGNED' ? getWorkLocationForDate(member.id, dateKey) : null;
+
                   const tasksForDay = memberTasks.filter((t) => {
                     const start = t.startDate ? new Date(t.startDate) : null;
                     if (start) start.setHours(0, 0, 0, 0);
@@ -191,6 +200,27 @@ export const WeekTimelineView: React.FC<WeekTimelineViewProps> = ({
                         wd.isToday ? 'bg-amber-500/5' : 'bg-transparent'
                       }`}
                     >
+                      {/* Work Location Badge */}
+                      {locInfo && locInfo.workType !== 'OFFICE' && (
+                        <div
+                          className={`px-1.5 py-0.5 rounded-md text-[9px] font-bold border flex items-center gap-1 mb-0.5 truncate ${
+                            locInfo.workType === 'WFH'
+                              ? 'bg-indigo-500/20 text-indigo-300 border-indigo-500/40'
+                              : locInfo.workType === 'LEAVE'
+                              ? 'bg-rose-500/20 text-rose-300 border-rose-500/40'
+                              : 'bg-cyan-500/20 text-cyan-300 border-cyan-500/40'
+                          }`}
+                          title={`${locInfo.sourceTitle}${locInfo.note ? `: ${locInfo.note}` : ''}`}
+                        >
+                          {locInfo.workType === 'WFH' && <Home className="w-2.5 h-2.5 shrink-0" />}
+                          {locInfo.workType === 'LEAVE' && <Palmtree className="w-2.5 h-2.5 shrink-0" />}
+                          {locInfo.workType === 'ON_SITE' && <Plane className="w-2.5 h-2.5 shrink-0" />}
+                          <span className="truncate">
+                            {locInfo.workType === 'WFH' ? 'WFH' : locInfo.workType === 'LEAVE' ? 'Nghỉ' : 'OnSite'}
+                            {locInfo.shift && locInfo.shift !== 'FULL_DAY' ? ` (${locInfo.shift === 'MORNING' ? 'S' : 'C'})` : ''}
+                          </span>
+                        </div>
+                      )}
                       {tasksForDay.map((task) => (
                         <div
                           key={task.id}

@@ -14,6 +14,7 @@ import type { TaskItem } from '../kanban/KanbanCard';
 interface MonthCalendarViewProps {
   currentDate: Date;
   tasks: TaskItem[];
+  selectedAssigneeId?: string;
   onSelectTask: (task: TaskItem) => void;
   onSelectDate: (date: Date) => void;
 }
@@ -21,6 +22,7 @@ interface MonthCalendarViewProps {
 export const MonthCalendarView: React.FC<MonthCalendarViewProps> = ({
   currentDate,
   tasks,
+  selectedAssigneeId,
   onSelectTask,
   onSelectDate,
 }) => {
@@ -165,8 +167,9 @@ export const MonthCalendarView: React.FC<MonthCalendarViewProps> = ({
           );
 
           // Lấy vị trí làm việc của user cho ngày này (Nguồn sự thật)
+          const targetUserId = selectedAssigneeId && selectedAssigneeId !== 'ALL' ? selectedAssigneeId : (authUser?.id || 'u-self');
           const dateKey = `${item.date.getFullYear()}-${String(item.date.getMonth() + 1).padStart(2, '0')}-${String(item.date.getDate()).padStart(2, '0')}`;
-          const locInfo = getWorkLocationForDate(authUser?.id || 'u-self', dateKey);
+          const locInfo = getWorkLocationForDate(targetUserId, dateKey);
 
           return (
             <div

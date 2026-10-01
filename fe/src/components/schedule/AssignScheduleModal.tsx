@@ -31,6 +31,7 @@ const WORK_TYPES: Array<{
   sub: string;
   icon: any;
   color: string;
+  activeBg: string;
 }> = [
   {
     id: 'OFFICE',
@@ -38,6 +39,7 @@ const WORK_TYPES: Array<{
     sub: 'Làm việc trực tiếp tại trụ sở công ty',
     icon: Building2,
     color: 'bg-emerald-500/20 text-emerald-300 border-emerald-500/40',
+    activeBg: 'from-emerald-500/30 to-emerald-600/30 border-emerald-400 text-emerald-200',
   },
   {
     id: 'WFH',
@@ -45,6 +47,7 @@ const WORK_TYPES: Array<{
     sub: 'Làm việc tại nhà / Remote',
     icon: Home,
     color: 'bg-indigo-500/20 text-indigo-300 border-indigo-500/40',
+    activeBg: 'from-indigo-500/30 to-indigo-600/30 border-indigo-400 text-indigo-200',
   },
   {
     id: 'ON_SITE',
@@ -52,6 +55,7 @@ const WORK_TYPES: Array<{
     sub: 'Gặp đối tác hoặc dự án ngoài công ty',
     icon: Plane,
     color: 'bg-cyan-500/20 text-cyan-300 border-cyan-500/40',
+    activeBg: 'from-cyan-500/30 to-cyan-600/30 border-cyan-400 text-cyan-200',
   },
   {
     id: 'LEAVE',
@@ -59,6 +63,7 @@ const WORK_TYPES: Array<{
     sub: 'Phép năm, nghỉ ốm, nghỉ chế độ',
     icon: Palmtree,
     color: 'bg-rose-500/20 text-rose-300 border-rose-500/40',
+    activeBg: 'from-rose-500/30 to-rose-600/30 border-rose-400 text-rose-200',
   },
 ];
 
@@ -70,20 +75,21 @@ export const AssignScheduleModal: React.FC<AssignScheduleModalProps> = ({
   defaultDate,
 }) => {
   const authUser = useAuthStore((state) => state.user);
-  const { setUserDailyWorkLocation } = useScheduleStore();
+  const { setUserBatchWorkLocations } = useScheduleStore();
 
   const todayStr = defaultDate || new Date().toISOString().split('T')[0];
   const [selectedUserId, setSelectedUserId] = useState(defaultUserId || (members[0]?.id || ''));
   const [startDate, setStartDate] = useState(todayStr);
   const [endDate, setEndDate] = useState(todayStr);
   const [workType, setWorkType] = useState<WorkLocationType>('OFFICE');
-  const [, setShift] = useState<WorkShift>('FULL_DAY');
+  const [shift, setShift] = useState<WorkShift>('FULL_DAY');
   const [note, setNote] = useState('');
+  const [isSubmitting, setIsSubmitting] = useState(false);
   const [errorMsg, setErrorMsg] = useState<string | null>(null);
 
   if (!isOpen) return null;
 
-  const handleSave = (e: React.FormEvent) => {
+  const handleSave = async (e: React.FormEvent) => {
     e.preventDefault();
     setErrorMsg(null);
 
@@ -97,18 +103,33 @@ export const AssignScheduleModal: React.FC<AssignScheduleModalProps> = ({
       return;
     }
 
-    const start = new Date(startDate);
-    const end = new Date(endDate);
-
-    for (let d = new Date(start); d <= end; d.setDate(d.getDate() + 1)) {
-      const dateKey = `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
-      setUserDailyWorkLocation(selectedUserId, workType, dateKey, {
-        adminId: authUser?.id || 'admin',
-        adminName: authUser?.fullName || 'Quản trị viên',
-      });
+    const dates: string[] = [];
+    const cur = new Date(`${startDate}T00:00:00.000Z`);
+    const end = new Date(`${endDate}T00:00:00.000Z`);
+    while (cur <= end) {
+      dates.push(cur.toISOString().split('T')[0]);
+      cur.setDate(cur.getDate() + 1);
     }
 
-    onClose();
+    try {
+      setIsSubmitting(true);
+      await setUserBatchWorkLocations(
+        selectedUserId,
+        workType,
+        dates,
+        {
+          adminId: authUser?.id || 'admin',
+          adminName: authUser?.fullName || 'Quản trị viên',
+        },
+        shift,
+        note.trim() || undefined
+      );
+      onClose();
+    } catch (err: any) {
+      setErrorMsg(err.message || 'Lỗi khi xếp lịch');
+    } finally {
+      setIsSubmitting(false);
+    }
   };
 
   return (
@@ -179,7 +200,7 @@ export const AssignScheduleModal: React.FC<AssignScheduleModalProps> = ({
                     onClick={() => setWorkType(wt.id)}
                     className={`p-3 rounded-2xl border text-left transition-all cursor-pointer flex items-center gap-2.5 ${
                       isSelected
-                        ? `${wt.color} shadow-lg ring-1 ring-amber-400/40 font-bold`
+                        ? `${wt.color} bg-gradient-to-r ${wt.activeBg} shadow-lg ring-1 ring-amber-400/40 font-bold`
                         : 'bg-slate-900/80 border-slate-800 text-slate-300 hover:border-slate-700'
                     }`}
                   >
@@ -199,7 +220,7 @@ export const AssignScheduleModal: React.FC<AssignScheduleModalProps> = ({
                 type="date"
                 value={startDate}
                 onChange={(e) => setStartDate(e.target.value)}
-                className="w-full px-2.5 py-2 rounded-xl bg-slate-900 border border-slate-700 text-white text-xs"
+                className="w-full px-2.5 py-2 rounded-xl bg-slate-900 border border-slate-700 text-white text-xs focus:border-amber-500 focus:outline-none"
               />
             </div>
             <div className="space-y-1">
@@ -208,18 +229,19 @@ export const AssignScheduleModal: React.FC<AssignScheduleModalProps> = ({
                 type="date"
                 value={endDate}
                 onChange={(e) => setEndDate(e.target.value)}
-                className="w-full px-2.5 py-2 rounded-xl bg-slate-900 border border-slate-700 text-white text-xs"
+                className="w-full px-2.5 py-2 rounded-xl bg-slate-900 border border-slate-700 text-white text-xs focus:border-amber-500 focus:outline-none"
               />
             </div>
             <div className="space-y-1">
               <label className="text-[11px] font-bold text-slate-300 block">Ca Làm</label>
               <select
+                value={shift}
                 onChange={(e) => setShift(e.target.value as WorkShift)}
-                className="w-full px-2 py-2 rounded-xl bg-slate-900 border border-slate-700 text-white text-xs"
+                className="w-full px-2 py-2 rounded-xl bg-slate-900 border border-slate-700 text-white text-xs focus:border-amber-500 focus:outline-none"
               >
                 <option value="FULL_DAY">🌕 Cả ngày</option>
-                <option value="MORNING">🌅 Sáng</option>
-                <option value="AFTERNOON">🌆 Chiều</option>
+                <option value="MORNING">🌅 Sáng (0.5d)</option>
+                <option value="AFTERNOON">🌆 Chiều (0.5d)</option>
               </select>
             </div>
           </div>
@@ -241,16 +263,18 @@ export const AssignScheduleModal: React.FC<AssignScheduleModalProps> = ({
             <button
               type="button"
               onClick={onClose}
-              className="px-4 py-2.5 rounded-xl bg-slate-800 hover:bg-slate-700 text-slate-300 text-xs font-bold transition-all cursor-pointer"
+              disabled={isSubmitting}
+              className="px-4 py-2.5 rounded-xl bg-slate-800 hover:bg-slate-700 text-slate-300 text-xs font-bold transition-all cursor-pointer disabled:opacity-50"
             >
               Hủy
             </button>
             <button
               type="submit"
-              className="px-5 py-2.5 rounded-xl bg-gradient-to-r from-amber-500 to-amber-600 hover:from-amber-400 hover:to-amber-500 text-slate-950 font-black text-xs flex items-center gap-1.5 transition-all shadow-lg cursor-pointer"
+              disabled={isSubmitting}
+              className="px-5 py-2.5 rounded-xl bg-gradient-to-r from-amber-500 to-amber-600 hover:from-amber-400 hover:to-amber-500 text-slate-950 font-black text-xs flex items-center gap-1.5 transition-all shadow-lg cursor-pointer disabled:opacity-50"
             >
               <Sparkles className="w-3.5 h-3.5" />
-              <span>Xác Nhận Xếp Lịch</span>
+              <span>{isSubmitting ? 'Đang lưu...' : 'Xác Nhận Xếp Lịch'}</span>
             </button>
           </div>
         </form>

@@ -30,7 +30,7 @@ interface ProjectOption {
 
 export const SchedulePage: React.FC = () => {
   const authUser = useAuthStore((state) => state.user);
-  const { leaveRequests } = useScheduleStore();
+  const { leaveRequests, fetchSchedulesAndLeaves } = useScheduleStore();
   const isAdmin = authUser?.globalRole === 'ADMIN';
   const isManager = authUser?.globalRole === 'MANAGER' || isAdmin;
   const pendingRequestsCount = leaveRequests.filter((r) => r.status === 'PENDING').length;
@@ -95,7 +95,8 @@ export const SchedulePage: React.FC = () => {
 
   useEffect(() => {
     fetchData();
-  }, []);
+    fetchSchedulesAndLeaves();
+  }, [fetchSchedulesAndLeaves]);
 
   // ⚡ Lắng Nghe Sự Kiện WebSockets Realtime
   useEffect(() => {
@@ -122,16 +123,28 @@ export const SchedulePage: React.FC = () => {
       }
     };
 
+    const handleScheduleSync = () => {
+      fetchSchedulesAndLeaves();
+    };
+
     socketService.on('task:updated', handleTaskUpdated);
     socketService.on('task:created', handleTaskCreated);
     socketService.on('task:deleted', handleTaskDeleted);
+    socketService.on('schedule:updated', handleScheduleSync);
+    socketService.on('leave:created', handleScheduleSync);
+    socketService.on('leave:reviewed', handleScheduleSync);
+    socketService.on('leave:cancelled', handleScheduleSync);
 
     return () => {
       socketService.off('task:updated', handleTaskUpdated);
       socketService.off('task:created', handleTaskCreated);
       socketService.off('task:deleted', handleTaskDeleted);
+      socketService.off('schedule:updated', handleScheduleSync);
+      socketService.off('leave:created', handleScheduleSync);
+      socketService.off('leave:reviewed', handleScheduleSync);
+      socketService.off('leave:cancelled', handleScheduleSync);
     };
-  }, [selectedTaskForDetail?.id]);
+  }, [selectedTaskForDetail?.id, fetchSchedulesAndLeaves]);
 
   // 🔍 Áp Dụng Bộ Lọc Đa Tiêu Chí
   const filteredTasks = tasks.filter((task) => {
@@ -255,6 +268,7 @@ export const SchedulePage: React.FC = () => {
             <MonthCalendarView
               currentDate={currentDate}
               tasks={filteredTasks}
+              selectedAssigneeId={selectedAssigneeId}
               onSelectTask={handleOpenDetailModal}
               onSelectDate={handleDateSelect}
             />

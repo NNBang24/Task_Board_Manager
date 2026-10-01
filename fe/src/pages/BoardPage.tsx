@@ -61,7 +61,7 @@ import {
 
 import { TaskTransferInboxModal } from '../components/kanban/TaskTransferInboxModal';
 import { DeleteTaskConfirmModal } from '../components/kanban/DeleteTaskConfirmModal';
-import {TaskActivityTimeline} from '../components/activity/TaskActivityTimeline'
+
 export const BoardPage: React.FC = () => {
   const user = useAuthStore((state) => state.user);
   const token = useAuthStore((state) => state.token);

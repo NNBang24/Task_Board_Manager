@@ -1,7 +1,6 @@
 import React, { useEffect, useState } from 'react';
 import { api } from '../../services/api';
 import { ArrowRight } from 'lucide-react';
-import { useAuthStore } from '../../store/useAuthStore';
 
 interface UserProfile {
   id?: string;
@@ -27,7 +26,6 @@ interface TaskActivityTimelineProps {
 }
 
 export const TaskActivityTimeline: React.FC<TaskActivityTimelineProps> = ({ taskId }) => {
-  const currentUser = useAuthStore((state) => state.user);
   const [activities, setActivities] = useState<ActivityItem[]>([]);
   const [isLoading, setIsLoading] = useState<boolean>(false);
   const [activeTab, setActiveTab] = useState<'all' | 'history' | 'worklog'>('all');

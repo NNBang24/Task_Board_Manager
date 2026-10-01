@@ -1,4 +1,5 @@
 import { create } from 'zustand';
+import { api } from '../services/api';
 
 export type WorkLocationType = 'OFFICE' | 'WFH' | 'ON_SITE' | 'LEAVE';
 export type WorkShift = 'FULL_DAY' | 'MORNING' | 'AFTERNOON';
@@ -8,6 +9,8 @@ export type LeaveStatus = 'PENDING' | 'APPROVED' | 'APPROVED_MODIFIED' | 'REJECT
 export interface WorkScheduleRecord {
   id: string;
   userId: string;
+  userName?: string;
+  userAvatar?: string;
   date: string; // Format: YYYY-MM-DD
   workType: WorkLocationType;
   shift: WorkShift;
@@ -75,21 +78,37 @@ export const getShiftShortLabel = (shift?: WorkShift): string => {
 interface ScheduleStoreState {
   workSchedules: WorkScheduleRecord[];
   leaveRequests: LeaveRequestRecord[];
+  isLoading: boolean;
 
-  // 📍 Hàm lấy trạng thái vị trí làm việc của một User tại một ngày bất kỳ (Lịch là nguồn sự thật)
+  // 🔄 Đồng bộ từ Server API CSDL
+  fetchSchedulesAndLeaves: (startDate?: string, endDate?: string, userId?: string) => Promise<void>;
+
+  // 📍 Lấy vị trí làm việc của một User tại một ngày bất kỳ (Lịch là nguồn sự thật)
   getWorkLocationForDate: (userId: string, dateStr: string) => WorkLocationInfo;
 
-  // 👑 Admin hoặc User tự cập nhật vị trí làm việc trong ngày
+  // 👑 Cập nhật vị trí làm việc 1 ngày
   setUserDailyWorkLocation: (
     userId: string,
     workType: WorkLocationType,
     dateStr?: string,
-    adminInfo?: { adminId: string; adminName: string }
-  ) => void;
+    adminInfo?: { adminId: string; adminName: string },
+    shift?: WorkShift,
+    customNote?: string
+  ) => Promise<void>;
+
+  // 🚀 Cập nhật vị trí làm việc hàng loạt theo dải ngày (Batch Update)
+  setUserBatchWorkLocations: (
+    userId: string,
+    workType: WorkLocationType,
+    dates: string[],
+    adminInfo?: { adminId: string; adminName: string },
+    shift?: WorkShift,
+    customNote?: string
+  ) => Promise<void>;
 
   // 📝 Quản lý Đơn xin nghỉ / WFH
-  addLeaveRequest: (request: Omit<LeaveRequestRecord, 'id' | 'createdAt' | 'status'>) => void;
-  cancelLeaveRequest: (requestId: string, userId: string) => void;
+  addLeaveRequest: (request: Omit<LeaveRequestRecord, 'id' | 'createdAt' | 'status'>) => Promise<void>;
+  cancelLeaveRequest: (requestId: string, userId: string) => Promise<void>;
   reviewLeaveRequest: (
     requestId: string,
     status: 'APPROVED' | 'APPROVED_MODIFIED' | 'REJECTED',
@@ -98,7 +117,7 @@ interface ScheduleStoreState {
     responseNote?: string,
     modifiedDates?: { startDate: string; endDate: string },
     modifiedShift?: WorkShift
-  ) => void;
+  ) => Promise<void>;
 
   // 📅 Lấy thống kê quân số trong ngày
   getDailyAttendanceStats: (dateStr: string) => {
@@ -142,12 +161,56 @@ const getInitialLeaveRequests = (): LeaveRequestRecord[] => {
 export const useScheduleStore = create<ScheduleStoreState>((set, get) => ({
   workSchedules: getInitialSchedules(),
   leaveRequests: getInitialLeaveRequests(),
+  isLoading: false,
+
+  fetchSchedulesAndLeaves: async (startDate, endDate, userId) => {
+    try {
+      set({ isLoading: true });
+      const params: Record<string, string> = {};
+      if (startDate) params.startDate = startDate;
+      if (endDate) params.endDate = endDate;
+      if (userId && userId !== 'ALL') params.userId = userId;
+
+      const [schedRes, leaveRes] = await Promise.all([
+        api.get('/schedule/work-schedules', { params }).catch(() => ({ data: [] })),
+        api.get('/schedule/leave-requests', { params: userId ? { userId } : {} }).catch(() => ({ data: [] })),
+      ]);
+
+      const fetchedSchedules = Array.isArray(schedRes.data)
+        ? schedRes.data
+        : Array.isArray(schedRes.data?.data)
+        ? schedRes.data.data
+        : [];
+
+      const fetchedLeaves = Array.isArray(leaveRes.data)
+        ? leaveRes.data
+        : Array.isArray(leaveRes.data?.data)
+        ? leaveRes.data.data
+        : [];
+
+      try {
+        localStorage.setItem('solaris_work_schedules', JSON.stringify(fetchedSchedules));
+        localStorage.setItem('solaris_leave_requests', JSON.stringify(fetchedLeaves));
+      } catch (err) {
+        console.error('LocalStorage sync error:', err);
+      }
+
+      set({
+        workSchedules: fetchedSchedules,
+        leaveRequests: fetchedLeaves,
+        isLoading: false,
+      });
+    } catch (err) {
+      console.error('Lỗi tải dữ liệu lịch từ Server:', err);
+      set({ isLoading: false });
+    }
+  },
 
   getWorkLocationForDate: (userId: string, dateStr: string): WorkLocationInfo => {
     const state = get();
     const targetDateKey = dateStr.split('T')[0];
 
-    // 1. 🌟 NGUỒN ƯU TIÊN 1: Đơn xin WFH / Nghỉ phép đã được Admin Duyệt
+    // 1. 🌟 NGUỒN ƯU TIÊN 1: Đơn xin WFH / Nghỉ phép đã được Duyệt
     const matchingApprovedLeave = state.leaveRequests.find((req) => {
       if (req.userId !== userId) return false;
       if (req.status !== 'APPROVED' && req.status !== 'APPROVED_MODIFIED') return false;
@@ -159,9 +222,10 @@ export const useScheduleStore = create<ScheduleStoreState>((set, get) => ({
     });
 
     if (matchingApprovedLeave) {
-      const shiftShort = matchingApprovedLeave.shift && matchingApprovedLeave.shift !== 'FULL_DAY'
-        ? ` (${getShiftShortLabel(matchingApprovedLeave.shift)})`
-        : '';
+      const shiftShort =
+        matchingApprovedLeave.shift && matchingApprovedLeave.shift !== 'FULL_DAY'
+          ? ` (${getShiftShortLabel(matchingApprovedLeave.shift)})`
+          : '';
       return {
         workType: matchingApprovedLeave.type === 'WFH' ? 'WFH' : 'LEAVE',
         shift: matchingApprovedLeave.shift,
@@ -173,15 +237,16 @@ export const useScheduleStore = create<ScheduleStoreState>((set, get) => ({
       };
     }
 
-    // 2. 🌟 NGUỒN ƯU TIÊN 2: Bản ghi Lịch Làm Việc chính thức (Admin Xếp hoặc Điều chỉnh Lịch)
+    // 2. 🌟 NGUỒN ƯU TIÊN 2: Bản ghi Lịch Làm Việc chính thức (Admin Xếp Lịch)
     const matchingSchedule = state.workSchedules.find(
       (s) => s.userId === userId && s.date === targetDateKey
     );
 
     if (matchingSchedule) {
-      const shiftShort = matchingSchedule.shift && matchingSchedule.shift !== 'FULL_DAY'
-        ? ` (${getShiftShortLabel(matchingSchedule.shift)})`
-        : '';
+      const shiftShort =
+        matchingSchedule.shift && matchingSchedule.shift !== 'FULL_DAY'
+          ? ` (${getShiftShortLabel(matchingSchedule.shift)})`
+          : '';
       return {
         workType: matchingSchedule.workType,
         shift: matchingSchedule.shift,
@@ -205,58 +270,79 @@ export const useScheduleStore = create<ScheduleStoreState>((set, get) => ({
     };
   },
 
-  setUserDailyWorkLocation: (userId, workType, dateStr, adminInfo) => {
+  setUserDailyWorkLocation: async (userId, workType, dateStr, adminInfo, shift, customNote) => {
     const targetDateKey = dateStr ? dateStr.split('T')[0] : formatDateToKey();
-
-    set((state) => {
-      const existingIdx = state.workSchedules.findIndex(
-        (s) => s.userId === userId && s.date === targetDateKey
-      );
-
-      let updatedSchedules: WorkScheduleRecord[];
-      if (existingIdx >= 0) {
-        updatedSchedules = state.workSchedules.map((s, idx) =>
-          idx === existingIdx
-            ? {
-                ...s,
-                workType,
-                note: adminInfo ? `Được chỉ định bởi Admin ${adminInfo.adminName}` : 'Cập nhật trực tiếp',
-                createdById: adminInfo?.adminId || s.createdById,
-                createdByName: adminInfo?.adminName || s.createdByName,
-                updatedAt: new Date().toISOString(),
-              }
-            : s
-        );
-      } else {
-        const newRecord: WorkScheduleRecord = {
-          id: `ws-${Date.now()}-${Math.random().toString(36).substr(2, 4)}`,
-          userId,
-          date: targetDateKey,
-          workType,
-          shift: 'FULL_DAY',
-          note: adminInfo ? `Được chỉ định bởi Admin ${adminInfo.adminName}` : 'Cập nhật trực tiếp',
-          createdById: adminInfo?.adminId,
-          createdByName: adminInfo?.adminName,
-          updatedAt: new Date().toISOString(),
-        };
-        updatedSchedules = [newRecord, ...state.workSchedules];
-      }
-
-      // Lưu LocalStorage đồng bộ
-      try {
-        localStorage.setItem('solaris_work_schedules', JSON.stringify(updatedSchedules));
-        localStorage.setItem(`solaris_user_work_location_${userId}`, workType);
-      } catch (err) {
-        console.error('Lỗi lưu schedule storage:', err);
-      }
-
-      return { workSchedules: updatedSchedules };
-    });
+    await get().setUserBatchWorkLocations(userId, workType, [targetDateKey], adminInfo, shift, customNote);
   },
 
-  addLeaveRequest: (reqData) => {
+  setUserBatchWorkLocations: async (userId, workType, dates, adminInfo, shift, customNote) => {
+    if (!dates || dates.length === 0) return;
+    const effectiveShift = shift || 'FULL_DAY';
+    const effectiveNote = customNote || (adminInfo ? `Được chỉ định bởi Admin ${adminInfo.adminName}` : 'Cập nhật trực tiếp');
+
+    // Optimistic Update
+    set((state) => {
+      const scheduleMap = new Map<string, WorkScheduleRecord>();
+      state.workSchedules.forEach((s) => {
+        scheduleMap.set(`${s.userId}_${s.date}_${s.shift || 'FULL_DAY'}`, s);
+      });
+
+      dates.forEach((dateKey) => {
+        const key = `${userId}_${dateKey}_${effectiveShift}`;
+        const existing = scheduleMap.get(key);
+        if (existing) {
+          scheduleMap.set(key, {
+            ...existing,
+            workType,
+            shift: effectiveShift,
+            note: effectiveNote,
+            createdById: adminInfo?.adminId || existing.createdById,
+            createdByName: adminInfo?.adminName || existing.createdByName,
+            updatedAt: new Date().toISOString(),
+          });
+        } else {
+          scheduleMap.set(key, {
+            id: `ws-${Date.now()}-${Math.random().toString(36).substr(2, 4)}`,
+            userId,
+            date: dateKey,
+            workType,
+            shift: effectiveShift,
+            note: effectiveNote,
+            createdById: adminInfo?.adminId,
+            createdByName: adminInfo?.adminName,
+            updatedAt: new Date().toISOString(),
+          });
+        }
+      });
+
+      const updatedSchedules = Array.from(scheduleMap.values());
+      try {
+        localStorage.setItem('solaris_work_schedules', JSON.stringify(updatedSchedules));
+      } catch (err) {
+        console.error('LocalStorage error:', err);
+      }
+      return { workSchedules: updatedSchedules };
+    });
+
+    // Gọi API Backend
+    try {
+      await api.post('/schedule/assign', {
+        userId,
+        workType,
+        dates,
+        shift: effectiveShift,
+        note: effectiveNote,
+      });
+      // Tải lại để đồng bộ chính xác ID CSDL
+      await get().fetchSchedulesAndLeaves();
+    } catch (err) {
+      console.error('Lỗi gọi API assign schedule:', err);
+    }
+  },
+
+  addLeaveRequest: async (reqData) => {
     const state = get();
-    // 🔒 [LC-114] CHẶN TRÙNG LẶP ĐƠN NGHỈ PHÉP / WFH TRONG KHOẢNG THỜI GIAN ĐÃ CÓ ĐƠN ĐANG CHỜ DUYỆT HOẶC ĐÃ DUYỆT
+    // 🔒 [LC-114] CHẶN TRÙNG LẶP ĐƠN
     const hasOverlap = state.leaveRequests.some((existing) => {
       if (existing.userId !== reqData.userId) return false;
       if (existing.status === 'REJECTED' || existing.status === 'CANCELLED') return false;
@@ -264,7 +350,6 @@ export const useScheduleStore = create<ScheduleStoreState>((set, get) => ({
       const existingStart = existing.approvedStartDate || existing.startDate;
       const existingEnd = existing.approvedEndDate || existing.endDate;
 
-      // Overlap condition: max(start1, start2) <= min(end1, end2)
       return reqData.startDate <= existingEnd && reqData.endDate >= existingStart;
     });
 
@@ -272,153 +357,106 @@ export const useScheduleStore = create<ScheduleStoreState>((set, get) => ({
       throw new Error('Bạn đã có đơn xin nghỉ / WFH (đang chờ duyệt hoặc đã duyệt) trong khoảng thời gian này!');
     }
 
-    const newReq: LeaveRequestRecord = {
-      ...reqData,
-      id: `lr-${Date.now()}`,
-      status: 'PENDING',
-      createdAt: new Date().toISOString(),
-    };
+    // Gọi API Backend
+    try {
+      const res = await api.post('/schedule/leave-requests', {
+        type: reqData.type,
+        startDate: reqData.startDate,
+        endDate: reqData.endDate,
+        shift: reqData.shift,
+        reason: reqData.reason,
+        handoverPlan: reqData.handoverPlan,
+      });
 
-    set((state) => {
-      const updated = [newReq, ...state.leaveRequests];
-      try {
-        localStorage.setItem('solaris_leave_requests', JSON.stringify(updated));
-      } catch (err) {
-        console.error('Lỗi lưu leave request storage:', err);
-      }
-      return { leaveRequests: updated };
-    });
-  },
-
-  cancelLeaveRequest: (requestId: string, userId: string) => {
-    set((state) => {
-      const targetReq = state.leaveRequests.find((r) => r.id === requestId);
-      if (!targetReq) return state;
-
-      // Chỉ chủ đơn hoặc Admin mới có quyền hủy
-      if (targetReq.userId !== userId) {
-        return state;
-      }
-
-      const updatedRequests = state.leaveRequests.map((r) =>
-        r.id === requestId ? { ...r, status: 'CANCELLED' as const } : r
-      );
-
-      // Nếu đơn trước đó đã duyệt -> Xóa hoặc khôi phục các bản ghi lịch làm việc đã sinh
-      let updatedSchedules = [...state.workSchedules];
-      if (targetReq.status === 'APPROVED' || targetReq.status === 'APPROVED_MODIFIED') {
-        const start = targetReq.approvedStartDate || targetReq.startDate;
-        const end = targetReq.approvedEndDate || targetReq.endDate;
-
-        updatedSchedules = updatedSchedules.filter((s) => {
-          if (s.userId !== targetReq.userId) return true;
-          return !(s.date >= start && s.date <= end && s.note?.includes(targetReq.reason));
-        });
-      }
-
-      try {
-        localStorage.setItem('solaris_leave_requests', JSON.stringify(updatedRequests));
-        localStorage.setItem('solaris_work_schedules', JSON.stringify(updatedSchedules));
-      } catch (err) {
-        console.error('Lỗi lưu cancel leave request storage:', err);
-      }
-
-      return {
-        leaveRequests: updatedRequests,
-        workSchedules: updatedSchedules,
+      const newRecord: LeaveRequestRecord = res.data?.data || res.data || {
+        ...reqData,
+        id: `lr-${Date.now()}`,
+        status: 'PENDING',
+        createdAt: new Date().toISOString(),
       };
-    });
+
+      set((curr) => {
+        const updated = [newRecord, ...curr.leaveRequests.filter((r) => r.id !== newRecord.id)];
+        try {
+          localStorage.setItem('solaris_leave_requests', JSON.stringify(updated));
+        } catch (err) {
+          console.error('LocalStorage error:', err);
+        }
+        return { leaveRequests: updated };
+      });
+    } catch (err: any) {
+      const errorMsg = err.response?.data?.message || err.message || 'Lỗi gửi đơn nghỉ phép';
+      throw new Error(errorMsg);
+    }
   },
 
-  reviewLeaveRequest: (
+  cancelLeaveRequest: async (requestId: string, _userId: string) => {
+    try {
+      await api.patch(`/schedule/leave-requests/${requestId}/cancel`);
+
+      set((state) => {
+        const targetReq = state.leaveRequests.find((r) => r.id === requestId);
+        if (!targetReq) return state;
+
+        const updatedRequests = state.leaveRequests.map((r) =>
+          r.id === requestId ? { ...r, status: 'CANCELLED' as const } : r
+        );
+
+        let updatedSchedules = [...state.workSchedules];
+        if (targetReq.status === 'APPROVED' || targetReq.status === 'APPROVED_MODIFIED') {
+          const start = targetReq.approvedStartDate || targetReq.startDate;
+          const end = targetReq.approvedEndDate || targetReq.endDate;
+
+          updatedSchedules = updatedSchedules.filter((s) => {
+            if (s.userId !== targetReq.userId) return true;
+            return !(s.date >= start && s.date <= end && s.note?.includes(targetReq.reason));
+          });
+        }
+
+        try {
+          localStorage.setItem('solaris_leave_requests', JSON.stringify(updatedRequests));
+          localStorage.setItem('solaris_work_schedules', JSON.stringify(updatedSchedules));
+        } catch (err) {
+          console.error('LocalStorage error:', err);
+        }
+
+        return {
+          leaveRequests: updatedRequests,
+          workSchedules: updatedSchedules,
+        };
+      });
+    } catch (err: any) {
+      console.error('Lỗi hủy đơn nghỉ phép:', err);
+      const errorMsg = err.response?.data?.message || err.message || 'Lỗi khi hủy đơn';
+      throw new Error(errorMsg);
+    }
+  },
+
+  reviewLeaveRequest: async (
     requestId,
     status,
-    approverId,
-    approverName,
+    _approverId,
+    _approverName,
     responseNote,
     modifiedDates,
     modifiedShift
   ) => {
-    set((state) => {
-      const targetReq = state.leaveRequests.find((r) => r.id === requestId);
-      if (!targetReq) return state;
+    try {
+      await api.patch(`/schedule/leave-requests/${requestId}/review`, {
+        status,
+        responseNote,
+        approvedStartDate: modifiedDates?.startDate,
+        approvedEndDate: modifiedDates?.endDate,
+        modifiedShift,
+      });
 
-      // 🔒 [LC-170] KHÓA TỰ PHÊ DUYỆT ĐƠN NGHỈ PHÉP & KHÓA ĐƠN ĐÃ CÓ KẾT QUẢ
-      if (targetReq.userId === approverId) {
-        console.warn('Không thể tự phê duyệt đơn xin nghỉ/WFH của chính mình!');
-        return state;
-      }
-      if (targetReq.status !== 'PENDING') {
-        console.warn('Đơn này đã được xử lý trước đó và không còn ở trạng thái chờ duyệt.');
-        return state;
-      }
-
-      const effectiveShift = modifiedShift || targetReq.shift || 'FULL_DAY';
-
-      const updatedRequests = state.leaveRequests.map((r) =>
-        r.id === requestId
-          ? {
-              ...r,
-              status,
-              shift: effectiveShift,
-              approverId,
-              approverName,
-              responseNote,
-              approvedStartDate: modifiedDates?.startDate || r.startDate,
-              approvedEndDate: modifiedDates?.endDate || r.endDate,
-            }
-          : r
-      );
-
-      // Nếu APPROVE -> Tự động sinh lịch làm việc tương ứng
-      let updatedSchedules = [...state.workSchedules];
-      if (status === 'APPROVED' || status === 'APPROVED_MODIFIED') {
-        const start = new Date(modifiedDates?.startDate || targetReq.startDate);
-        const end = new Date(modifiedDates?.endDate || targetReq.endDate);
-        const workType: WorkLocationType = targetReq.type === 'WFH' ? 'WFH' : 'LEAVE';
-
-        for (let d = new Date(start); d <= end; d.setDate(d.getDate() + 1)) {
-          const dateKey = formatDateToKey(d);
-          const existingIdx = updatedSchedules.findIndex(
-            (s) => s.userId === targetReq.userId && s.date === dateKey
-          );
-
-          if (existingIdx >= 0) {
-            updatedSchedules[existingIdx] = {
-              ...updatedSchedules[existingIdx],
-              workType,
-              shift: effectiveShift,
-              note: `Đơn đã duyệt: ${targetReq.reason}`,
-              updatedAt: new Date().toISOString(),
-            };
-          } else {
-            updatedSchedules.push({
-              id: `ws-${Date.now()}-${Math.random().toString(36).substr(2, 4)}`,
-              userId: targetReq.userId,
-              date: dateKey,
-              workType,
-              shift: effectiveShift,
-              note: `Đơn đã duyệt: ${targetReq.reason}`,
-              createdById: approverId,
-              createdByName: approverName,
-              updatedAt: new Date().toISOString(),
-            });
-          }
-        }
-      }
-
-      try {
-        localStorage.setItem('solaris_leave_requests', JSON.stringify(updatedRequests));
-        localStorage.setItem('solaris_work_schedules', JSON.stringify(updatedSchedules));
-      } catch (err) {
-        console.error('Lỗi cập nhật reviewed leave request:', err);
-      }
-
-      return {
-        leaveRequests: updatedRequests,
-        workSchedules: updatedSchedules,
-      };
-    });
+      // Tải lại dữ liệu mới nhất từ CSDL
+      await get().fetchSchedulesAndLeaves();
+    } catch (err: any) {
+      console.error('Lỗi duyệt đơn:', err);
+      const errorMsg = err.response?.data?.message || err.message || 'Lỗi khi duyệt đơn';
+      throw new Error(errorMsg);
+    }
   },
 
   getDailyAttendanceStats: (dateStr) => {

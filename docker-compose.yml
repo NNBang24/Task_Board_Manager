@@ -1,7 +1,5 @@
-version: '3.8'
-
 services:
-  # 1. Database PostgreSQL 16
+  # 1. Database PostgreSQL 16 (Toi uu gioi han RAM 512MB)
   postgres_db:
     image: postgres:16-alpine
     container_name: app_postgres
@@ -19,13 +17,13 @@ services:
       interval: 5s
       timeout: 5s
       retries: 5
-    mem_limit: 1024m
+    mem_limit: 512m
     deploy:
       resources:
         limits:
-          memory: 1024M
+          memory: 512M
 
-  # 2. Backend NestJS 11
+  # 2. Backend NestJS 11 (Toi uu gioi han RAM 1024MB)
   backend_api:
     build:
       context: ./be
@@ -40,13 +38,13 @@ services:
     depends_on:
       postgres_db:
         condition: service_healthy
-    mem_limit: 2048m
+    mem_limit: 1024m
     deploy:
       resources:
         limits:
-          memory: 2048M
+          memory: 1024M
 
-  # 3. Frontend React 19 + Vite 8
+  # 3. Frontend React 19 + Vite 8 (Toi uu gioi han RAM 512MB)
   frontend_web:
     build:
       context: ./fe
@@ -59,11 +57,11 @@ services:
       - '5173:80'
     depends_on:
       - backend_api
-    mem_limit: 1024m
+    mem_limit: 512m
     deploy:
       resources:
         limits:
-          memory: 1024M
+          memory: 512M
 
 volumes:
   pgdata:

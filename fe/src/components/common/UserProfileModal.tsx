@@ -1,4 +1,5 @@
 import React, { useState, useRef, useEffect } from 'react';
+import ReactDOM from 'react-dom';
 import {
   X,
   Mail,
@@ -217,8 +218,8 @@ export const UserProfileModal: React.FC<UserProfileModalProps> = ({
   const defaultProjects = user.assignedProjects || [];
   const defaultTasks = user.recentTasks || [];
 
-  return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center p-3 sm:p-4 md:p-6 bg-black/80 backdrop-blur-md animate-fade-in">
+  const modalContent = (
+    <div className="fixed inset-0 z-[999999] flex items-center justify-center p-3 sm:p-4 md:p-6 bg-black/80 backdrop-blur-md animate-fade-in">
       <div className="w-full max-w-2xl max-h-[92vh] rounded-3xl bg-[#0f172a] border border-slate-800 shadow-2xl relative overflow-hidden flex flex-col animate-solar-warp-in">
         {/* 🌠 Cover Photo Header */}
         <div className="relative h-36 sm:h-44 w-full overflow-hidden shrink-0">
@@ -573,4 +574,9 @@ export const UserProfileModal: React.FC<UserProfileModalProps> = ({
       </div>
     </div>
   );
+
+  if (typeof document !== 'undefined') {
+    return ReactDOM.createPortal(modalContent, document.body);
+  }
+  return modalContent;
 };

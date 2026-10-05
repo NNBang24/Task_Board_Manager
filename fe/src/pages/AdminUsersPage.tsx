@@ -887,7 +887,7 @@ export const AdminUsersPage: React.FC = () => {
                       onClick={(e) => e.stopPropagation()}
                     >
                       {/* Trạng thái Hoạt động / Khóa */}
-                      <td className="py-3.5 px-4">
+                      <div>
                         <span
                           className={`text-[10px] font-mono font-bold px-2 py-0.5 rounded-lg border inline-block ${
                             user.isActive === true
@@ -897,7 +897,7 @@ export const AdminUsersPage: React.FC = () => {
                         >
                           {user.isActive === true ? '● Hoạt động' : '■ Đã khóa'}
                         </span>
-                      </td>
+                      </div>
 
                       {/* Action Icon Buttons */}
                       <div className="flex items-center gap-1.5">

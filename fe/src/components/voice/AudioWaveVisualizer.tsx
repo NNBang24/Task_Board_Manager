@@ -5,14 +5,15 @@ interface AudioWaveVisualizerProps {
   volume: number; // 0 to 100
 }
 
+/**
+ * Component hien thi visualizer song am thanh dong theo bien do am luong.
+ */
 export const AudioWaveVisualizer: React.FC<AudioWaveVisualizerProps> = ({ isListening, volume }) => {
-  // 16 bars representing equalizer bands
   const barCount = 16;
   const bars = Array.from({ length: barCount }, (_, i) => i);
 
   return (
     <div className="flex flex-col items-center justify-center gap-2.5 py-1">
-      {/* 🌟 Center Glowing Orb with Dynamic Pulsing Scale */}
       <div className="relative flex items-center justify-center">
         <div
           className={`w-14 h-14 rounded-full bg-gradient-to-tr from-amber-500 via-amber-400 to-purple-600 transition-transform duration-100 flex items-center justify-center shadow-xl ${
@@ -29,7 +30,6 @@ export const AudioWaveVisualizer: React.FC<AudioWaveVisualizerProps> = ({ isList
           </div>
         </div>
 
-        {/* Ambient Ring Wave when speaking */}
         {isListening && volume > 10 && (
           <div
             className="absolute inset-0 rounded-full border border-amber-400/40 animate-ping pointer-events-none"
@@ -38,10 +38,8 @@ export const AudioWaveVisualizer: React.FC<AudioWaveVisualizerProps> = ({ isList
         )}
       </div>
 
-      {/* 📊 Futuristic Neon Equalizer Wave Bars */}
       <div className="flex items-center gap-1.5 h-9 px-3.5 py-1 rounded-xl bg-slate-950/80 border border-slate-800">
         {bars.map((index) => {
-          // Calculate dynamic height based on volume and sinusoidal wave
           const distanceToCenter = Math.abs(index - (barCount - 1) / 2);
           const factor = Math.max(0.2, 1 - distanceToCenter / (barCount / 2));
           const dynamicHeight = isListening

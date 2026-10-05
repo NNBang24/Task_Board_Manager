@@ -6,7 +6,11 @@ datasource db {
   provider = "postgresql"
   //  url      = env("DATABASE_URL")
 }
-
+enum VoiceLogStatus {
+  SUCCESS
+  PARSED   
+  FAILED  
+}
 enum Role {
   ADMIN
   MANAGER
@@ -183,6 +187,7 @@ model User {
   createdWorkSchedules   WorkSchedule[]  @relation("CreatedWorkSchedules")
   leaveRequests          LeaveRequest[]  @relation("UserLeaveRequests")
   approvedLeaveRequests  LeaveRequest[]  @relation("ApprovedLeaveRequests")
+  voiceLogs              VoiceCommandLog[]
 
   @@map("users")
 }
@@ -207,6 +212,7 @@ model Project {
   members     ProjectMember[]
   tasks       Task[]
   tags        Tag[]
+  voiceLogs   VoiceCommandLog[]
 
   @@index([isDeleted])
   @@map("projects")
@@ -245,6 +251,7 @@ model Task {
   startDate      DateTime?    @map("start_date")
   dueDate        DateTime?    @map("due_date")
   recurrenceRule String?      @map("recurrence_rule")
+  rawVoice       String?      @map("raw_voice")
   isArchived     Boolean      @default(false) @map("is_archived")
   isDeleted      Boolean      @default(false) @map("is_deleted")
   deletedAt      DateTime?    @map("deleted_at")
@@ -266,6 +273,7 @@ model Task {
   attachments   Attachment[]
   notifications Notification[]
   histories     TaskHistory[]
+  voiceLogs      VoiceCommandLog[] 
 
   @@index([projectId, status])
   @@index([assigneeId, status])
@@ -440,6 +448,27 @@ model TaskHistory {
 
   @@index([taskId, createdAt])
   @@map("task_histories")
+}
+model VoiceCommandLog {
+  id               String         @id @default(uuid())
+  userId           String         @map("user_id")
+  rawAudioText     String         @map("raw_audio_text")   
+  intent           String?                                 
+  parsedJson       String?        @map("parsed_json")      
+  status           VoiceLogStatus @default(PARSED)
+  processingTimeMs Int?           @map("processing_time_ms") 
+  projectId        String?        @map("project_id")       
+  taskId           String?        @map("task_id")          
+  errorMessage     String?        @map("error_message")
+  createdAt        DateTime       @default(now()) @map("created_at")
+
+  user    User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  project Project? @relation(fields: [projectId], references: [id], onDelete: SetNull)
+  task    Task?    @relation(fields: [taskId], references: [id], onDelete: SetNull)
+
+  @@index([userId, createdAt])
+  @@index([status])
+  @@map("voice_command_logs")
 }
 
 model WorkSchedule {

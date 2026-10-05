@@ -1,4 +1,5 @@
-import React, { useState, useRef, useEffect } from 'react';
+import React, { useState, useRef, useEffect, useMemo } from 'react';
+import ReactDOM from 'react-dom';
 import {
   Clock,
   AlertCircle,
@@ -17,8 +18,11 @@ import {
   CheckSquare,
   Square,
   Sparkles,
+  Users,
+  X,
 } from 'lucide-react';
 import { useAuthStore } from '../../store/useAuthStore';
+import { useUserStore } from '../../store/useUserStore';
 import { api } from '../../services/api';
 import { UserProfileModal, type UserProfileData } from '../common/UserProfileModal';
 import { getAvatarUrl } from '../../utils/avatar';
@@ -119,12 +123,82 @@ export const KanbanCard: React.FC<KanbanCardProps> = React.memo(({
   const [isCopied, setIsCopied] = useState(false);
   const [isSubtasksOpen, setIsSubtasksOpen] = useState(false);
   const [profileUser, setProfileUser] = useState<UserProfileData | null>(null);
+  const [isMembersModalOpen, setIsMembersModalOpen] = useState(false);
   const menuRef = useRef<HTMLDivElement>(null);
+
+  // 👥 Tổng hợp tất cả những người đang cùng thực hiện Task (Chính + Phối hợp + Task con)
+  const allAssignees = useMemo(() => {
+    const map = new Map<string, any>();
+    if (task.assignee && (task.assignee.id || task.assignee.fullName)) {
+      map.set(task.assignee.id || task.assignee.fullName, {
+        ...task.assignee,
+        roleInTask: 'Chịu Trách Nhiệm Chính (Assignee)',
+      });
+    }
+    if (Array.isArray(task.assignees)) {
+      task.assignees.forEach((a) => {
+        if (a && (a.id || a.fullName) && !map.has(a.id || a.fullName)) {
+          map.set(a.id || a.fullName, {
+            ...a,
+            roleInTask: 'Thành Viên Phối Hợp',
+          });
+        }
+      });
+    }
+    if (Array.isArray(task.subtasks)) {
+      task.subtasks.forEach((st) => {
+        if (st.assignee && (st.assignee.id || st.assignee.fullName)) {
+          const key = st.assignee.id || st.assignee.fullName;
+          if (!map.has(key)) {
+            map.set(key, {
+              ...st.assignee,
+              roleInTask: `Phụ Trách Việc Con: "${st.title}"`,
+            });
+          }
+        }
+      });
+    }
+    return Array.from(map.values());
+  }, [task.assignee, task.assignees, task.subtasks]);
 
   const handleOpenAssigneeProfile = (e: React.MouseEvent, targetUser?: any) => {
     e.stopPropagation();
-    const u = targetUser || task.assignee;
-    if (!u) return;
+    const u = targetUser || (allAssignees.length === 1 ? allAssignees[0] : null) || task.assignee;
+    if (!u) {
+      if (allAssignees.length > 1) {
+        setIsMembersModalOpen(true);
+      }
+      return;
+    }
+
+    // Tìm trong user store để lấy đầy đủ thông tin chuẩn nhất
+    const allUsers = useUserStore.getState().users;
+    const matchedUser = allUsers.find(
+      (storeUser) => (u.id && storeUser.id === u.id) || (u.email && storeUser.email?.toLowerCase() === u.email?.toLowerCase())
+    );
+
+    if (matchedUser) {
+      setProfileUser({
+        id: matchedUser.id,
+        fullName: matchedUser.fullName,
+        email: matchedUser.email,
+        phone: matchedUser.phone,
+        avatarUrl: getAvatarUrl(matchedUser),
+        avatar: getAvatarUrl(matchedUser),
+        globalRole: matchedUser.globalRole,
+        profession: matchedUser.profession,
+        jobTitle: matchedUser.jobTitle,
+        department: matchedUser.department,
+        statusSignal: matchedUser.statusSignal,
+        joinedDate: matchedUser.joinedDate,
+        projectsCount: matchedUser.projectsCount,
+        tasksCount: matchedUser.tasksCount,
+        bio: matchedUser.bio,
+        workMode: matchedUser.workMode || 'OFFICE',
+      });
+      return;
+    }
+
     setProfileUser({
       id: u.id || 'u-assignee',
       fullName: u.fullName || 'Thành viên Solaris',
@@ -144,10 +218,13 @@ export const KanbanCard: React.FC<KanbanCardProps> = React.memo(({
       (task.assigneeId === currentUser.id ||
         task.assignee?.id === currentUser.id ||
         task.assignee?.email === currentUser.email ||
+        (task.assignees && task.assignees.some((a) => a.id === currentUser.id || a.email === currentUser.email)) ||
+        (task.subtasks && task.subtasks.some((st) => st.assigneeId === currentUser.id || st.assignee?.id === currentUser.id)) ||
         (!task.assigneeId && task.createdById === currentUser.id))
   );
 
   const isAdminOrManager = currentUser?.globalRole === 'ADMIN' || currentUser?.globalRole === 'MANAGER';
+  const canTransferOrRequest = isMyTask || isAdminOrManager;
 
   // Close menu when clicking outside
   useEffect(() => {
@@ -261,7 +338,7 @@ export const KanbanCard: React.FC<KanbanCardProps> = React.memo(({
           {isMenuOpen && (
             <div
               onClick={(e) => e.stopPropagation()}
-              className="absolute right-0 top-full mt-1.5 w-48 rounded-2xl bg-[#0F172A]/95 border border-amber-500/40 shadow-[0_10px_30px_rgba(0,0,0,0.8)] backdrop-blur-xl p-1.5 z-50 animate-solar-warp-in space-y-1 text-xs"
+              className="absolute right-0 top-full mt-1.5 w-52 rounded-2xl bg-[#0F172A]/95 border border-amber-500/40 shadow-[0_10px_30px_rgba(0,0,0,0.8)] backdrop-blur-xl p-1.5 z-50 animate-solar-warp-in space-y-1 text-xs"
             >
               {/* Chi tiết Task */}
               <button
@@ -275,8 +352,8 @@ export const KanbanCard: React.FC<KanbanCardProps> = React.memo(({
                 <span>Xem Chi Tiết Task</span>
               </button>
 
-              {/* Yêu Cầu Bàn Giao (Dành Cho Chính Chủ Task) */}
-              {isMyTask && (
+              {/* Yêu Cầu Bàn Giao & Gửi Duyệt */}
+              {canTransferOrRequest && (
                 <button
                   onClick={() => {
                     setIsMenuOpen(false);
@@ -285,7 +362,7 @@ export const KanbanCard: React.FC<KanbanCardProps> = React.memo(({
                   className="w-full px-3 py-2 rounded-xl text-left font-semibold text-amber-300 hover:text-amber-200 hover:bg-amber-500/20 flex items-center gap-2 transition-colors cursor-pointer"
                 >
                   <Send className="w-3.5 h-3.5 text-amber-400" />
-                  <span>Chuyển Giao Task</span>
+                  <span>Gửi Duyệt / Chuyển Giao</span>
                 </button>
               )}
 
@@ -593,53 +670,63 @@ export const KanbanCard: React.FC<KanbanCardProps> = React.memo(({
       {/* Footer Info */}
       <div className="flex items-center justify-between gap-2 pt-2 border-t border-slate-800/80 text-[11px] text-slate-400 min-w-0">
         <div
-          onClick={(e) => handleOpenAssigneeProfile(e)}
+          onClick={(e) => {
+            e.stopPropagation();
+            if (allAssignees.length > 1) {
+              setIsMembersModalOpen(true);
+            } else {
+              handleOpenAssigneeProfile(e, allAssignees[0] || task.assignee);
+            }
+          }}
           className="flex items-center gap-1.5 min-w-0 flex-1 hover:text-amber-300 transition-colors cursor-pointer group/assignee"
-          title="Nhấn để xem hồ sơ nhân sự"
+          title={allAssignees.length > 1 ? 'Nhấn để xem danh sách tất cả người làm task này' : 'Nhấn để xem hồ sơ nhân sự'}
         >
           {/* Avatar Stack Group */}
-          {task.assignees && task.assignees.length > 1 ? (
+          {allAssignees.length > 1 ? (
             <div className="flex items-center -space-x-1.5 overflow-hidden shrink-0">
-              {task.assignees.slice(0, 3).map((u, i) => (
+              {allAssignees.slice(0, 3).map((u, i) => (
                 <div
                   key={u.id || i}
-                  onClick={(e) => handleOpenAssigneeProfile(e, u)}
+                  onClick={(e) => {
+                    e.stopPropagation();
+                    handleOpenAssigneeProfile(e, u);
+                  }}
                   className="w-6 h-6 rounded-full bg-slate-800 border border-slate-700 flex items-center justify-center font-bold text-[8px] text-cyan-300 overflow-hidden shadow-sm hover:border-amber-400 transition-colors cursor-pointer"
                   title={`Xem hồ sơ: ${u.fullName}`}
                 >
                   {u.avatar ? (
-                    <img src={u.avatar} alt="Avatar" className="w-full h-full object-cover" />
+                    <img src={getAvatarUrl(u)} alt="Avatar" className="w-full h-full object-cover" />
                   ) : (
                     <span>{u.fullName ? u.fullName.split(' ').map((n: string) => n[0]).join('').slice(0, 2).toUpperCase() : 'UA'}</span>
                   )}
                 </div>
               ))}
-              {task.assignees.length > 3 && (
+              {allAssignees.length > 3 && (
                 <div className="w-6 h-6 rounded-full bg-cyan-950 border border-slate-700 flex items-center justify-center font-bold text-[8px] text-cyan-300">
-                  +{task.assignees.length - 3}
+                  +{allAssignees.length - 3}
                 </div>
               )}
             </div>
           ) : (
             <div className="w-6 h-6 rounded-full bg-slate-800 border border-slate-700 flex items-center justify-center font-bold text-[9px] text-amber-300 overflow-hidden shrink-0 group-hover/assignee:border-amber-400 transition-colors">
-              {task.assignee?.avatar ? (
-                <img src={task.assignee.avatar} alt="Avatar" className="w-full h-full object-cover" />
+              {(allAssignees[0] || task.assignee)?.avatar ? (
+                <img src={getAvatarUrl(allAssignees[0] || task.assignee)} alt="Avatar" className="w-full h-full object-cover" />
               ) : (
-                <span>{task.assignee?.fullName ? task.assignee.fullName.split(' ').map(n => n[0]).join('').slice(0, 2).toUpperCase() : 'UA'}</span>
+                <span>{(allAssignees[0] || task.assignee)?.fullName ? (allAssignees[0] || task.assignee).fullName.split(' ').map((n: string) => n[0]).join('').slice(0, 2).toUpperCase() : 'UA'}</span>
               )}
             </div>
           )}
           <span
             className="truncate font-medium text-slate-300 max-w-[105px] group-hover/assignee:text-amber-300 transition-colors"
             title={
-              task.assignees && task.assignees.length > 1
-                ? task.assignees.map((u) => u.fullName).join(', ')
-                : task.assignee?.fullName || 'Chưa phân công'
+              allAssignees.length > 1
+                ? allAssignees.map((u) => u.fullName).join(', ')
+                : (allAssignees[0] || task.assignee)?.fullName || 'Chưa phân công'
             }
           >
-            {task.assignees && task.assignees.length > 1
-              ? `${task.assignees.length} người làm`
-              : task.assignee?.fullName?.replace(/\s*\([^)]*\)/g, '') || 'Chưa phân công'}
+            {allAssignees.length > 1
+              ? `${allAssignees.length} người làm`
+              : (allAssignees[0] || task.assignee)?.fullName?.replace(/\s*\([^)]*\)/g, '') || 'Chưa phân công'}
           </span>
         </div>
 
@@ -686,7 +773,86 @@ export const KanbanCard: React.FC<KanbanCardProps> = React.memo(({
         </div>
       </div>
 
-      {/*  UNIVERSAL USER PROFILE MODAL */}
+      {/* 👥 Modal Danh Sách Tất Cả Thành Viên Cùng Làm Task Này */}
+      {isMembersModalOpen && typeof document !== 'undefined' && ReactDOM.createPortal(
+        <div
+          onClick={(e) => {
+            e.stopPropagation();
+            setIsMembersModalOpen(false);
+          }}
+          className="fixed inset-0 z-[999999] flex items-center justify-center p-4 bg-black/80 backdrop-blur-md animate-fade-in"
+        >
+          <div
+            onClick={(e) => e.stopPropagation()}
+            className="w-full max-w-md rounded-3xl bg-[#0F172A] border border-amber-500/40 shadow-2xl p-6 space-y-5 animate-solar-warp-in text-left"
+          >
+            <div className="flex items-center justify-between border-b border-slate-800 pb-3">
+              <div className="flex items-center gap-2.5">
+                <div className="p-2 rounded-xl bg-amber-500/20 text-amber-400 border border-amber-500/30">
+                  <Users className="w-5 h-5" />
+                </div>
+                <div>
+                  <h3 className="text-sm font-bold text-white">Thành Viên Thực Hiện ({allAssignees.length} người)</h3>
+                  <p className="text-[11px] text-slate-400 truncate max-w-[260px]">{task.title}</p>
+                </div>
+              </div>
+              <button
+                onClick={() => setIsMembersModalOpen(false)}
+                className="p-1.5 rounded-lg text-slate-400 hover:text-white bg-slate-900 border border-slate-800 cursor-pointer"
+              >
+                <X className="w-4 h-4" />
+              </button>
+            </div>
+
+            <div className="space-y-2.5 max-h-[60vh] overflow-y-auto pr-1">
+              {allAssignees.map((u, idx) => (
+                <div
+                  key={u.id || idx}
+                  className="p-3 rounded-2xl bg-slate-900/80 border border-slate-800 hover:border-slate-700 flex items-center justify-between gap-3 transition-colors group"
+                >
+                  <div className="flex items-center gap-3 min-w-0">
+                    <img
+                      src={getAvatarUrl(u)}
+                      alt={u.fullName}
+                      className="w-10 h-10 rounded-xl object-cover border border-slate-700 bg-slate-950 shrink-0"
+                    />
+                    <div className="min-w-0">
+                      <span className="font-bold text-white text-xs block truncate group-hover:text-amber-300">
+                        {u.fullName}
+                      </span>
+                      <span className="text-[10px] text-amber-400/90 font-mono block truncate">
+                        {u.roleInTask}
+                      </span>
+                    </div>
+                  </div>
+
+                  <button
+                    onClick={(e) => {
+                      setIsMembersModalOpen(false);
+                      handleOpenAssigneeProfile(e, u);
+                    }}
+                    className="px-3 py-1.5 rounded-xl bg-amber-500 hover:bg-amber-400 text-slate-950 font-bold text-[11px] shrink-0 transition-all cursor-pointer shadow-sm"
+                  >
+                    Xem Hồ Sơ
+                  </button>
+                </div>
+              ))}
+            </div>
+
+            <div className="pt-2 text-right">
+              <button
+                onClick={() => setIsMembersModalOpen(false)}
+                className="px-4 py-2 rounded-xl bg-slate-800 hover:bg-slate-700 text-slate-200 text-xs font-bold cursor-pointer"
+              >
+                Đóng
+              </button>
+            </div>
+          </div>
+        </div>,
+        document.body
+      )}
+
+      {/* 🌟 UNIVERSAL USER PROFILE MODAL */}
       <UserProfileModal
         user={profileUser}
         isOpen={!!profileUser}
